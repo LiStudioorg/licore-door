@@ -1,0 +1,13 @@
+{
+  "name": "LiCore — 轻量级容器引擎",
+  "short_name": "LiCore",
+  "description": "用 Go 编写的轻量级容器引擎，常驻内存 10–20 MiB，单二进制分发。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

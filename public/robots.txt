@@ -1,0 +1,8 @@
+# LiCore 官网 robots.txt
+User-agent: *
+Allow: /
+Disallow: /api/
+
+# 允许主流搜索引擎抓取全部公开页面
+Sitemap: http://licore.z321.cc.cd/sitemap.xml
+Host: licore.z321.cc.cd

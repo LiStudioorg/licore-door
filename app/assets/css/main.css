@@ -1,0 +1,136 @@
+/**
+ * 全局样式入口。
+ * fuxsto-design 自带全部组件样式与 @theme 指令，消费方只需要这两行 + 自己的页面样式。
+ */
+@import 'tailwindcss';
+@import 'fuxsto-design/styles';
+
+/* ------------------------------------------------------------------ *
+ * 站点专属设计令牌（在库令牌之上叠加，不改库本体）
+ * ------------------------------------------------------------------ */
+@theme {
+  --color-brand: oklch(0.72 0.19 152);
+  --color-brand-foreground: oklch(0.16 0.02 152);
+}
+
+/* 让暗色模式跟随系统，同时支持 .dark 显式覆盖（库已注册 dark 变体） */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
+      'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  }
+
+  code,
+  pre,
+  kbd {
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+      'Liberation Mono', monospace;
+  }
+
+  /* 键盘可达性：统一 focus 样式 */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  ::selection {
+    @apply bg-primary/20;
+  }
+}
+
+@layer components {
+  /* 页面容器 */
+  .site-container {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  /* 顶部渐隐光晕，首页 hero 背景 */
+  .hero-glow {
+    background:
+      radial-gradient(60% 50% at 50% 0%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 70%),
+      radial-gradient(40% 40% at 85% 10%, color-mix(in oklch, var(--color-brand) 12%, transparent) 0%, transparent 60%);
+  }
+
+  /* 细网格背景 */
+  .grid-pattern {
+    background-image:
+      linear-gradient(to right, color-mix(in oklch, var(--border) 60%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklch, var(--border) 60%, transparent) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(70% 60% at 50% 0%, black 0%, transparent 100%);
+  }
+
+  /* 卡片悬浮反馈 */
+  .lift {
+    @apply transition-all duration-200;
+  }
+  .lift:hover {
+    @apply -translate-y-0.5 shadow-lg;
+  }
+
+  /* 代码块 */
+  .code-block {
+    @apply overflow-x-auto rounded-lg border border-border bg-muted/50 p-4 text-sm leading-relaxed;
+  }
+
+  /* 版本条目左侧时间线 */
+  .timeline-rail {
+    @apply relative border-l border-border pl-6;
+  }
+  .timeline-rail::before {
+    content: '';
+    @apply absolute -left-[5px] top-1.5 size-2.5 rounded-full border-2 border-background bg-primary;
+  }
+}
+
+/* 长的版本说明 markdown 渲染 */
+.prose-licore {
+  @apply text-sm leading-7;
+}
+.prose-licore h1,
+.prose-licore h2,
+.prose-licore h3 {
+  @apply mt-5 mb-2 font-semibold text-base;
+}
+.prose-licore h1:first-child,
+.prose-licore h2:first-child,
+.prose-licore h3:first-child {
+  @apply mt-0;
+}
+.prose-licore p {
+  @apply my-2;
+}
+.prose-licore ul {
+  @apply my-2 list-disc space-y-1 pl-5;
+}
+.prose-licore ol {
+  @apply my-2 list-decimal space-y-1 pl-5;
+}
+.prose-licore code {
+  @apply rounded bg-muted px-1.5 py-0.5 text-[0.85em];
+}
+.prose-licore pre {
+  @apply my-3 overflow-x-auto rounded-lg border border-border bg-muted/60 p-3;
+}
+.prose-licore pre code {
+  @apply bg-transparent p-0;
+}
+.prose-licore a {
+  @apply text-primary underline underline-offset-4;
+}
+.prose-licore blockquote {
+  @apply my-3 border-l-2 border-border pl-4 text-muted-foreground;
+}
+.prose-licore table {
+  @apply my-3 w-full border-collapse text-xs;
+}
+.prose-licore th,
+.prose-licore td {
+  @apply border border-border px-2 py-1 text-left;
+}
