@@ -86,6 +86,95 @@ NITRO_PORT=3000
 
 ---
 
+## 二·补、配置文件（TOML）
+
+除了环境变量，站点还支持一个 TOML 配置文件 **`licore-site.toml`**（仓库根目录已附带一份，
+字段含义全部写在文件注释里）。
+
+> ⚠️ 这是**官网自己**的配置，与 LiCore 引擎无关。
+> LiCore 引擎的配置是 `~/.licore/config.yaml`，格式为 **YAML** —— 上游
+> `AGENTS.md` 明确规定"一律 YAML，不要混用 TOML/JSON 配置文件"。
+> 两者不要搞混。
+
+**优先级**：环境变量 > `licore-site.toml` > 内置默认值。
+（所以 `GITHUB_TOKEN` / `NUXT_PUBLIC_SITE_URL` 设了环境变量就会盖掉文件里的值。）
+
+**查找顺序**（找到第一个就用）：
+`LICORE_SITE_CONFIG` 环境变量指定的路径 → 进程工作目录 → 项目根目录。
+
+**改完必须重启服务**才会生效：
+
+```bash
+sudo systemctl restart licore-website   # 或
+pm2 restart licore-website
+```
+
+### 容错行为
+
+配置文件**不会**让站点挂掉 —— 这是刻意的设计：
+
+| 情况 | 行为 |
+| --- | --- |
+| 文件不存在 | 全部用内置默认值，打印一条告警 |
+| TOML 语法错误 | 同上，告警里带上具体出错的行与列 |
+| 字段类型不对（如 `enabled = "yes"`） | 只有该字段回退默认值，其余字段照常生效 |
+| `site.url` 不是 http(s) 绝对地址 | 回退默认值（避免拼出错误的 canonical） |
+| `admin.sessionHours` 为负 | 回退默认值 |
+
+所有告警都会打印到服务日志，并在**后台面板**顶部汇总显示，方便直接定位。
+
+---
+
+## 二·补二、后台管理面板（`/admin`）
+
+站点内置一个运维面板，访问 **`/admin`**。
+
+### 登录
+
+默认账号密码 **`admin` / `admin`**，在 `licore-site.toml` 里修改：
+
+```toml
+[admin]
+enabled = true
+username = "admin"
+password = "admin"        # ← 改这里
+sessionHours = 12         # 会话有效期（小时）
+allowCacheClear = true    # 是否允许在面板上一键清缓存
+```
+
+> 🔒 **公网部署请务必改掉默认密码。** 密码是**明文**存在配置文件里的，
+> 请确保该文件权限收紧（`chmod 600 licore-site.toml`），且**不要把真实密码提交到公开仓库**。
+> 面板检测到仍在使用默认密码时会在顶部显示醒目告警。
+
+### 面板能做什么
+
+| 功能 | 说明 |
+| --- | --- |
+| **上游状态** | GitHub 可达性、最近推送时间、响应耗时、token 是否已配置 |
+| **缓存管理** | 列出每个缓存键的年龄 / TTL / 是否新鲜，支持**单项清理**与**一键清空**，让页面立刻重新拉取上游而不用等 TTL 过期 |
+| **生效配置** | 当前加载的配置文件路径、站点地址、TTL、显示开关；**不回显密码**，只告知是否仍是默认值 |
+
+### 安全设计
+
+- **HMAC 签名的会话 Cookie**（`HttpOnly` + `SameSite=Lax`），无服务端会话存储。
+  客户端拿不到签名密钥，**无法伪造** cookie；已验证篡改签名与伪造 payload 均返回 401。
+- 账号与密码都用**恒定时间比较**，避免通过响应时间猜密码；登录失败不区分"用户名错"还是"密码错"。
+- `enabled = false` 时，`/admin` 与 `/api/admin/*` **一律返回 404** —— 比只关登录更彻底。
+- 面板页 `noindex, nofollow`，且 `public/robots.txt` 已 `Disallow: /admin`。
+- 会话密钥在进程启动时随机生成，**重启服务会让所有会话失效**（需重新登录）。
+  单机小站这样做足够；要多实例共享会话得改成固定密钥。
+
+### 后台接口
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/admin/login` | `{ username, password }` → 写入会话 cookie |
+| `POST /api/admin/logout` | 清除会话，幂等 |
+| `GET /api/admin/status` | 面板数据源（需登录） |
+| `POST /api/admin/cache/clear` | `{ key? }`，不传 key 即清空全部（需登录 + `allowCacheClear`） |
+
+---
+
 ## 三、GitHub Actions 自动化
 
 仓库内置两个 workflow：
@@ -341,18 +430,27 @@ server {
 │       ├── changelog.vue       # 更新日志（自动聚合）
 │       ├── download.vue        # 下载（自动适配二进制 / 源码）
 │       ├── docs.vue            # 使用文档
-│       └── about.vue           # 关于
+│       ├── about.vue           # 关于
+│       └── admin.vue           # 后台管理面板（登录 + 状态 + 缓存管理）
 ├── server/
 │   ├── api/                    # JSON 接口
 │   │   ├── changelog.get.ts    # GET /api/changelog?limit=5
 │   │   ├── releases.get.ts     # GET /api/releases
 │   │   ├── repo.get.ts         # GET /api/repo
 │   │   ├── commits.get.ts      # GET /api/commits?limit=20
-│   │   └── status.get.ts       # GET /api/status（健康检查）
+│   │   ├── status.get.ts       # GET /api/status（公开健康检查）
+│   │   └── admin/              # 后台接口（全部需登录）
+│   │       ├── login.post.ts
+│   │       ├── logout.post.ts
+│   │       ├── status.get.ts
+│   │       └── cache/clear.post.ts
 │   └── utils/
-│       ├── github.ts           # GitHub 数据层（缓存 / 去重 / 回退）
-│       └── changelog.ts        # 更新日志与下载项聚合
+│       ├── github.ts           # GitHub 数据层（缓存 / 去重 / 回退 / 可清理）
+│       ├── changelog.ts        # 更新日志与下载项聚合
+│       ├── config.ts           # TOML 配置加载与校验（容错 + 默认值）
+│       └── auth.ts             # 后台认证（HMAC 签名会话 cookie）
 ├── public/                     # logo、favicon、og.svg、robots.txt、manifest
+├── licore-site.toml            # 站点配置文件（TOML）
 ├── MAINTENANCE.md              # 给 AI 代理的维护手册（内容同步工作流）
 ├── DEPLOY.md                   # 部署指南
 ├── deploy/
@@ -442,6 +540,7 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 | Tailwind CSS | 4.x | 原子化样式 |
 | fuxsto-design | 1.0.5 | Vue 3 组件库（单色 zinc 设计语言） |
 | lucide-vue-next | 0.577.x | 图标 |
+| smol-toml | 1.9.x | TOML 配置解析（零依赖） |
 | @nuxtjs/sitemap | 7.x | sitemap 生成 |
 
 ---

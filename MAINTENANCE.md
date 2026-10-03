@@ -263,6 +263,41 @@ done
 # 全部应为 200
 ```
 
+**注意**：这个 `node ... &` + `kill %1` 的写法只在**交互式 shell** 里可靠。
+在脚本里 `%1` 可能指向别的任务，且 `kill` 与 `rm` 写在同一行时，
+PID 文件可能先被删掉导致杀不掉进程。稳妥做法是**按端口反查 PID**：
+
+```bash
+pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+[ -n "$pid" ] && kill "$pid"
+```
+
+**如果改动了后台或配置相关代码**（`server/utils/config.ts`、`server/utils/auth.ts`、
+`server/api/admin/`、`app/pages/admin.vue`、`licore-site.toml`），额外验证：
+
+```bash
+B=http://127.0.0.1:3111
+# 未登录必须被拒
+curl -s -o /dev/null -w "未登录 status: %{http_code}（应 401）\n" "$B/api/admin/status"
+
+# 错误密码必须被拒
+curl -s -o /dev/null -w "错误密码: %{http_code}（应 401）\n" \
+  -X POST "$B/api/admin/login" -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"wrong"}'
+
+# 正确登录 → 拿到会话
+curl -s -c /tmp/ck.txt -o /dev/null -w "登录: %{http_code}（应 200）\n" \
+  -X POST "$B/api/admin/login" -H 'content-type: application/json' \
+  -d '{"username":"admin","password":"admin"}'
+
+# 带会话访问状态
+curl -s -b /tmp/ck.txt -o /dev/null -w "已登录 status: %{http_code}（应 200）\n" "$B/api/admin/status"
+
+# 面板页本身
+curl -s -o /dev/null -w "/admin: %{http_code}（应 200）\n" "$B/admin"
+rm -f /tmp/ck.txt
+```
+
 **注意**：改动 SEO 相关字段（3.4 节）时，额外确认输出：
 
 ```bash
@@ -329,6 +364,8 @@ git push origin main
 | **Android 无 Root 不支持** | 这是官方明确立场，描述 Android 支持时不能含糊。 |
 | **历史 tag v0.1.0~v0.6.1 是 Boxli** | 项目 v0.7.0 从 Boxli 更名。描述历史时注意区分，不要把 v0.6.x 说成 LiCore。 |
 | **上游 release.yml 已就位** | 上游已有 `release.yml` 但尚未产生 Release。若下载页突然出现二进制链接，属站点自动切换，不要改代码去"修"它。 |
+| **`/admin` 也是 200** | 后台面板页本身返回 200（登录表单靠客户端渲染），所以冒烟测试里 `/admin` 也应该是 200。**未登录时 `/api/admin/*` 返回 401 是正确的**，不要把它当故障。 |
+| **本站配置是 TOML，上游是 YAML** | 别把两者搞混：`licore-site.toml` 是**官网自己**的配置；LiCore 引擎用 `~/.licore/config.yaml`，上游 `AGENTS.md` 明确规定"不要混用 TOML/JSON 配置文件"。写官网文案时不要声称 LiCore 用 TOML。 |
 
 ---
 
@@ -371,12 +408,46 @@ git push origin main
 | `app/pages/about.vue` | 关于页（定位、更名历史） | ⚠️ 仅事实性描述 |
 | `app/pages/changelog.vue` | 更新日志 | ❌ 自动聚合 |
 | `app/pages/download.vue` | 下载页 | ❌ 自动适配 |
+| `app/pages/admin.vue` | 后台管理面板 | ❌ 与上游内容无关 |
 | `app/config/site.ts` | 站点元信息（域名、SEO 描述） | ⚠️ 仅 description/tagline |
+| `licore-site.toml` | 站点配置文件（TOML） | ❌ 与上游内容无关 |
+| `server/utils/config.ts` | TOML 配置加载与校验 | ❌ 不要动 |
+| `server/utils/auth.ts` | 后台认证（会话 cookie） | ❌ 不要动 |
+| `server/api/admin/` | 后台接口 | ❌ 不要动 |
 | `server/utils/changelog.ts` | 版本与下载聚合 | ❌ 不要动 |
 | `server/utils/github.ts` | GitHub 数据层（缓存/TTL） | ❌ 不要动 |
 | `README.md` | 项目说明（给人看） | ⚠️ 功能变化时同步 |
 | `DEPLOY.md` | 部署指南 | ❌ 除非部署方式变了 |
 | `.github/workflows/ci.yml` | CI（类型检查+构建+冒烟） | ❌ 不要动 |
+
+> **注意**：`server/utils/github.ts` 里的 TTL 现在读的是 `licore-site.toml` 的
+> `[github]` 段（`releases` / `repo` / `contributors`，单位秒），
+> 不再是硬编码的 `minutes(5)`。改缓存时长请改配置文件，不要改代码。
+
+---
+
+## 10. 后台面板与配置文件（非内容维护，但别改坏）
+
+站点有一个后台面板 `/admin`，账号密码在 `licore-site.toml` 的 `[admin]` 段
+（默认 `admin` / `admin`）。相关文件：
+
+| 文件 | 作用 |
+| --- | --- |
+| `licore-site.toml` | 站点配置：站点地址、后台账号、GitHub token、缓存 TTL、显示开关 |
+| `server/utils/config.ts` | 加载并校验 TOML；任何错误都回退默认值，**绝不让站点挂掉** |
+| `server/utils/auth.ts` | HMAC 签名会话 cookie；未登录一律 401 |
+| `server/api/admin/*` | 登录 / 登出 / 状态 / 清缓存 |
+
+**做内容同步时你不需要碰这些**。只有一条要注意：
+
+- 如果你改动了 `app/config/site.ts` 的 `description`（第 3.4 节），
+  记得 `licore-site.toml` 里的 `site.url` 与 `app/config/site.ts` 的 `site.url`
+  是**两个地方**（前者优先级更高，因为它在运行时覆盖后者）。
+  换域名时**两边都要改**，否则 sitemap 与 canonical 会不一致。
+
+配置文件是**容错**的：字段类型写错只会让该字段回退默认值，其余字段照常生效，
+并打印告警（后台面板顶部也会汇总显示）。所以你不必担心手滑改坏站点，
+但改完仍要跑第 5 节的验证。
 
 ---
 

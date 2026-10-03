@@ -83,7 +83,7 @@ jobs:
           # 注意：SSR 动态站点即使 GitHub 不可达也应返回 200（页面降级渲染），
           # 所以这里断言 200 是合理的，而不是断言页面里必须有实时数据。
           FAIL=0
-          for path in / /changelog /download /docs /about /sitemap.xml /robots.txt; do
+          for path in / /changelog /download /docs /about /admin /sitemap.xml /robots.txt; do
             CODE=$(curl -s -o /dev/null -w '%{http_code}' "${TEST_URL}${path}")
             if [ "$CODE" = "200" ]; then
               echo "  ✓ ${path} → ${CODE}"
@@ -92,6 +92,26 @@ jobs:
               FAIL=1
             fi
           done
+
+          # 后台接口必须拒绝未登录访问（401）。这是安全底线，
+          # 不能只靠人工记得测 —— 一旦鉴权被改坏，这里必须让 CI 变红。
+          echo "检查后台鉴权…"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "${TEST_URL}/api/admin/status")
+          if [ "$CODE" = "401" ]; then
+            echo "  ✓ /api/admin/status 未登录 → ${CODE}"
+          else
+            echo "  ✗ /api/admin/status 未登录返回 ${CODE}，应为 401（鉴权失效！）"
+            FAIL=1
+          fi
+
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${TEST_URL}/api/admin/login" \
+            -H 'content-type: application/json' -d '{"username":"admin","password":"definitely-wrong"}')
+          if [ "$CODE" = "401" ]; then
+            echo "  ✓ 错误密码登录 → ${CODE}"
+          else
+            echo "  ✗ 错误密码登录返回 ${CODE}，应为 401（鉴权失效！）"
+            FAIL=1
+          fi
 
           # 关键 SEO 标签必须存在
           echo "检查 SEO 标签…"

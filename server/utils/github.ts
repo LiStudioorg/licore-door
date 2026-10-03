@@ -11,6 +11,7 @@
  * 注意：本模块只在服务端运行，token 不会进入客户端产物。
  */
 import type { H3Event } from 'h3'
+import { siteConfig } from './config'
 
 const API = 'https://api.github.com'
 const OWNER = 'LiStudioorg'
@@ -172,7 +173,8 @@ function authHeaders(): Record<string, string> {
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'licore-website',
   }
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN
+  // token 来源：环境变量 GITHUB_TOKEN / GH_TOKEN，或 licore-site.toml 的 [github].token
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || siteConfig.github.token
   if (token) headers.Authorization = `Bearer ${token}`
   return headers
 }
@@ -281,22 +283,24 @@ function mapTag(raw: any): GitHubTag {
  * 发行相关数据固定 5 分钟刷新一次：上游一发布新版本、或补上 Release 资产，
  * 官网最多 5 分钟后就会自动反映出来，无需重新部署。
  *
- * 可用环境变量 GITHUB_CACHE_TTL_SECONDS 统一覆盖（本地调试时设为 5 即可秒级刷新）。
+ * 优先级：环境变量 GITHUB_CACHE_TTL_SECONDS（统一覆盖，本地调试设为 5 即可秒级刷新）
+ *        > licore-site.toml 的 [github] 段 > 内置默认值。
  */
 const TTL_OVERRIDE = Number(process.env.GITHUB_CACHE_TTL_SECONDS) || 0
-const minutes = (n: number) => (TTL_OVERRIDE > 0 ? TTL_OVERRIDE * 1000 : n * 60 * 1000)
+/** TOML 里按秒配置；同样受 GITHUB_CACHE_TTL_SECONDS 统一覆盖 */
+const seconds = (n: number) => (TTL_OVERRIDE > 0 ? TTL_OVERRIDE * 1000 : n * 1000)
 
 export const TTL = {
   /** 仓库元信息：变化慢，10 分钟 */
-  repo: minutes(10),
+  repo: seconds(siteConfig.github.repo),
   /** 发行版：5 分钟刷新（核心要求） */
-  releases: minutes(5),
-  /** 版本 tag：5 分钟刷新 */
-  tags: minutes(5),
-  /** 提交记录：5 分钟刷新 */
-  commits: minutes(5),
+  releases: seconds(siteConfig.github.releases),
+  /** 版本 tag：跟随发行版设置 */
+  tags: seconds(siteConfig.github.releases),
+  /** 提交记录：跟随发行版设置 */
+  commits: seconds(siteConfig.github.releases),
   /** 贡献者：变化最慢，30 分钟 */
-  contributors: minutes(30),
+  contributors: seconds(siteConfig.github.contributors),
 } as const
 
 /** 供页面展示"数据新鲜度"与 API 缓存头使用 */
@@ -412,4 +416,24 @@ export function cacheStats() {
     })),
     inflight: [...inflight.keys()],
   }
+}
+
+/**
+ * 清空数据缓存（后台面板的「清理缓存」用）。
+ *
+ * @param key 只清这一个键；不传则清空全部
+ * @returns 实际被清掉的键名
+ *
+ * 注意只清 `store`，不动 `inflight`：正在飞的请求写回时还会填一次缓存，
+ * 这是可接受的（下一次读取会拿到新数据），而去动 inflight 反而可能让
+ * 等待中的调用者拿到被丢弃的 Promise。
+ */
+export function invalidateCache(key?: string): string[] {
+  if (key) {
+    const existed = store.delete(key)
+    return existed ? [key] : []
+  }
+  const keys = [...store.keys()]
+  store.clear()
+  return keys
 }

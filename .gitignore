@@ -6,3 +6,10 @@ dist
 .env
 *.log
 .DS_Store
+
+# 站点配置文件。
+# 仓库里跟踪的是 licore-site.toml（含默认 admin/admin，供开箱即用）。
+# 若你想在本地/服务器放**含真实密码**的配置，用 licore-site.local.toml
+# 并通过环境变量指向它，避免误提交：
+#   LICORE_SITE_CONFIG=/opt/licore-website/licore-site.local.toml
+licore-site.local.toml

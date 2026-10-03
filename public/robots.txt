@@ -2,6 +2,8 @@
 User-agent: *
 Allow: /
 Disallow: /api/
+# 后台管理面板不对外公开，禁止抓取
+Disallow: /admin
 
 # 允许主流搜索引擎抓取全部公开页面
 Sitemap: http://licore.z321.cc.cd/sitemap.xml

@@ -67,6 +67,9 @@ export default defineNuxtConfig({
    */
   sitemap: {
     autoLastmod: true,
+    // 后台面板会被 sitemap 模块自动发现，必须显式排除：
+    // 该页面本身已是 noindex，若再出现在 sitemap 里会给爬虫互相矛盾的信号。
+    exclude: ['/admin'],
     // changefreq / priority 属于"每条 URL 的默认值"，需放在 defaults 里
     defaults: { changefreq: 'daily', priority: 0.8 },
     urls: [
