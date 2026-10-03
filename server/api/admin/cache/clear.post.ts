@@ -11,13 +11,13 @@ import { siteConfig } from '../../../utils/config'
 
 export default defineEventHandler(async (event) => {
   if (!siteConfig.admin.enabled) {
-    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+    throw createError({ statusCode: 404, message: 'Not Found' })
   }
   if (!isAuthenticated(event)) {
-    throw createError({ statusCode: 401, statusMessage: '未登录' })
+    throw createError({ statusCode: 401, message: '未登录' })
   }
   if (!siteConfig.admin.allowCacheClear) {
-    throw createError({ statusCode: 403, statusMessage: '配置已禁止在面板上清理缓存' })
+    throw createError({ statusCode: 403, message: '配置已禁止在面板上清理缓存' })
   }
 
   const body = await readBody<{ key?: unknown }>(event).catch(() => null)

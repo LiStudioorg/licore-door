@@ -11,10 +11,10 @@ import { configPath, configWarnings, siteConfig } from '../../utils/config'
 
 export default defineEventHandler(async (event) => {
   if (!siteConfig.admin.enabled) {
-    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+    throw createError({ statusCode: 404, message: 'Not Found' })
   }
   if (!isAuthenticated(event)) {
-    throw createError({ statusCode: 401, statusMessage: '未登录' })
+    throw createError({ statusCode: 401, message: '未登录' })
   }
 
   // 面板数据必须实时，不能被任何一层缓存住

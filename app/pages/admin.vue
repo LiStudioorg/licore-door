@@ -128,7 +128,7 @@ async function loadStatus() {
       authed.value = false
       loadError.value = '后台面板已关闭（licore-site.toml 里 admin.enabled = false），/api/admin 全部不可访问。'
     } else {
-      loadError.value = err?.data?.statusMessage || err?.message || '加载失败'
+      loadError.value = err?.data?.message || err?.message || '加载失败'
     }
   } finally {
     checking.value = false
@@ -148,7 +148,7 @@ async function login() {
     form.password = ''
     await loadStatus()
   } catch (err: any) {
-    loginError.value = err?.data?.statusMessage || '登录失败，请重试'
+    loginError.value = err?.data?.message || '登录失败，请重试'
   } finally {
     loggingIn.value = false
   }
@@ -173,7 +173,7 @@ async function clearCache(key?: string) {
     flash(res.clearedCount > 0 ? `已清理 ${res.clearedCount} 项缓存` : '没有可清理的缓存项')
     await loadStatus()
   } catch (err: any) {
-    flash(err?.data?.statusMessage || '清理失败', 'err')
+    flash(err?.data?.message || '清理失败', 'err')
   } finally {
     busy.value = ''
   }

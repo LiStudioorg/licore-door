@@ -366,6 +366,7 @@ git push origin main
 | **上游 release.yml 已就位** | 上游已有 `release.yml` 但尚未产生 Release。若下载页突然出现二进制链接，属站点自动切换，不要改代码去"修"它。 |
 | **`/admin` 也是 200** | 后台面板页本身返回 200（登录表单靠客户端渲染），所以冒烟测试里 `/admin` 也应该是 200。**未登录时 `/api/admin/*` 返回 401 是正确的**，不要把它当故障。 |
 | **本站配置是 TOML，上游是 YAML** | 别把两者搞混：`licore-site.toml` 是**官网自己**的配置；LiCore 引擎用 `~/.licore/config.yaml`，上游 `AGENTS.md` 明确规定"不要混用 TOML/JSON 配置文件"。写官网文案时不要声称 LiCore 用 TOML。 |
+| **`echo "$HTML" \| grep -q` 在 pipefail 下会假阴性** | `grep -q` 匹配到立刻退出，`echo` 继续写已关闭的管道触发 SIGPIPE，pipeline 整体非 0，断言被误判失败（`<title>` 在页首最容易踩中，CI 实际红过一次）。冒烟脚本里判定大段 HTML 一律**先落盘再 `grep -q needle file`**，别走管道。 |
 
 ---
 

@@ -113,17 +113,22 @@ jobs:
             FAIL=1
           fi
 
-          # 关键 SEO 标签必须存在
+          # 关键 SEO 标签必须存在。
+          # 注意：这里刻意用临时文件而不是 `echo "$HTML" | grep -q`。
+          # grep -q 匹配到就立刻退出，而 echo 还在往管道里写剩下的几十 KB，
+          # 会触发 SIGPIPE 让 echo 以非 0 退出；本步骤开着 set -o pipefail，
+          # 于是整个 pipeline 被误判为失败（<title> 在页首最容易踩中）。
           echo "检查 SEO 标签…"
-          HTML=$(curl -s "$TEST_URL/")
+          curl -s "$TEST_URL/" -o /tmp/smoke-home.html
           for needle in '<title>' 'rel="canonical"' 'og:title' 'application/ld+json' 'name="description"'; do
-            if echo "$HTML" | grep -q "$needle"; then
+            if grep -q "$needle" /tmp/smoke-home.html; then
               echo "  ✓ ${needle}"
             else
               echo "  ✗ 缺少 ${needle}"
               FAIL=1
             fi
           done
+          rm -f /tmp/smoke-home.html
 
           if [ "$FAIL" -ne 0 ]; then
             echo "::error::冒烟测试未通过"
