@@ -1,0 +1,108 @@
+name: Deploy
+
+# 部署到服务器。默认关闭自动触发，避免在你没配好 Secrets 之前就报失败。
+#
+# 启用方式（二选一）：
+#   1. 到仓库 Settings → Secrets and variables → Actions → Variables
+#      新建变量 DEPLOY_ENABLED，值设为 true；
+#   2. 或直接删掉下面这一行 if 条件。
+on:
+  workflow_run:
+    # 等 CI 跑完再部署，保证只部署构建通过的提交
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: 部署到生产服务器
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # 只有 CI 成功时才部署；手动触发时跳过该判断
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && vars.DEPLOY_ENABLED == 'true')
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --registry=https://registry.npmjs.org
+
+      - name: 生产构建
+        run: npm run build
+        env:
+          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'http://licore.z321.cc.cd' }}
+
+      - name: 打包构建产物
+        run: |
+          set -euo pipefail
+          # 只传运行必需的产物，不传源码与依赖
+          tar -czf release.tar.gz .output package.json
+          ls -lh release.tar.gz
+
+      - name: 配置 SSH
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # 固定服务器指纹，避免 TOFU 提示
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: 上传并切换版本
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          APP_DIR: ${{ secrets.DEPLOY_PATH }}
+          GITHUB_TOKEN_VALUE: ${{ secrets.LICORE_GITHUB_TOKEN }}
+          SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'http://licore.z321.cc.cd' }}
+          APP_PORT: ${{ vars.APP_PORT || '3000' }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_ID="$(date -u +%Y%m%d-%H%M%S)-${GITHUB_SHA::7}"
+          echo "部署版本：${RELEASE_ID}"
+
+          # 1. 上传压缩包到临时目录
+          scp -i ~/.ssh/id_deploy -P "$SSH_PORT" -o StrictHostKeyChecking=yes \
+            release.tar.gz "${SSH_USER}@${SSH_HOST}:/tmp/licore-website-${RELEASE_ID}.tar.gz"
+
+          # 2. 在服务器上执行部署脚本
+          #    脚本单独放在 .github/scripts/remote-deploy.sh，
+          #    通过 stdin 传给远端 bash，避免 YAML 折叠块标量的缩进歧义。
+          #    远端环境变量用 env 前缀逐条声明，显式且不会被注入。
+          ssh -i ~/.ssh/id_deploy -p "$SSH_PORT" -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" \
+            "RELEASE_ID='${RELEASE_ID}' APP_DIR='${APP_DIR}' APP_PORT='${APP_PORT}' SITE_URL='${SITE_URL}' GITHUB_TOKEN_VALUE='${GITHUB_TOKEN_VALUE}' bash -s" \
+            < .github/scripts/remote-deploy.sh
+
+      - name: 部署结果
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "### 部署成功 ✅" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### 部署失败 ❌" >> $GITHUB_STEP_SUMMARY
+            echo "请检查 Secrets 配置与服务器上的 licore-website 服务。" >> $GITHUB_STEP_SUMMARY
+          fi

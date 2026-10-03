@@ -86,7 +86,91 @@ NITRO_PORT=3000
 
 ---
 
-## 三、部署到服务器
+## 三、GitHub Actions 自动化
+
+仓库内置两个 workflow：
+
+| 文件 | 触发时机 | 作用 |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | push / PR 到 `main` | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
+| `.github/workflows/deploy.yml` | CI 成功后 / 手动触发 | 构建并部署到服务器，**原子切换 + 健康检查 + 失败可回滚** |
+
+### CI 做了什么
+
+CI 不只是"能编译"，它会真的把 `.output` 跑起来并断言 12 项：
+
+- 7 条路由（`/`、`/changelog`、`/download`、`/docs`、`/about`、`/sitemap.xml`、`/robots.txt`）必须返回 200
+- 5 个 SEO 关键标签必须存在（`<title>`、`canonical`、`og:title`、`description`、JSON-LD）
+
+> 注意：本站是 SSR 动态站点，**即使 GitHub 上游不可达，页面也会降级渲染并返回 200**。
+> 所以断言 200 是合理的，而不是断言页面里必须有实时数据 —— 否则上游一限流 CI 就会红。
+
+### 启用自动部署
+
+部署默认是**关闭**的，避免你还没配好 Secrets 就一路报错。启用步骤：
+
+**1. 配置 Secrets**（仓库 Settings → Secrets and variables → Actions → Secrets）
+
+| Secret | 必需 | 说明 |
+| --- | --- | --- |
+| `DEPLOY_HOST` | ✅ | 服务器地址 |
+| `DEPLOY_USER` | ✅ | SSH 用户名 |
+| `DEPLOY_SSH_KEY` | ✅ | 部署用私钥（**建议单独生成一把，别用你日常的密钥**） |
+| `DEPLOY_KNOWN_HOSTS` | ✅ | `ssh-keyscan your-server` 的输出，用于固定主机指纹 |
+| `DEPLOY_PATH` | ✅ | 应用根目录，例如 `/opt/licore-website` |
+| `DEPLOY_PORT` | ⬜ | SSH 端口，默认 22 |
+| `LICORE_GITHUB_TOKEN` | ⬜ | 提升 GitHub API 配额（强烈建议），只写入服务器，不进仓库 |
+
+**2. 配置 Variables**（同页面的 Variables 标签）
+
+| Variable | 必需 | 说明 |
+| --- | --- | --- |
+| `DEPLOY_ENABLED` | ✅ | 设为 `true` 才会在 CI 成功后自动部署 |
+| `NUXT_PUBLIC_SITE_URL` | ⬜ | 默认 `http://licore.z321.cc.cd` |
+| `APP_PORT` | ⬜ | 应用监听端口，默认 `3000` |
+
+**3. 在服务器上准备目录与服务**
+
+```bash
+sudo mkdir -p /opt/licore-website/releases
+sudo chown -R $USER /opt/licore-website
+```
+
+然后按下面「部署到服务器」一节配置好名为 `licore-website` 的 systemd 服务或 pm2 进程
+（脚本就是靠这个名字重启服务的）。
+
+**4. 生成部署密钥**
+
+```bash
+ssh-keygen -t ed25519 -C "licore-website-deploy" -f ./deploy_key -N ""
+ssh-copy-id -i ./deploy_key.pub user@your-server
+# 把 deploy_key 内容贴进 DEPLOY_SSH_KEY
+ssh-keyscan your-server > known_hosts   # 内容贴进 DEPLOY_KNOWN_HOSTS
+rm -f ./deploy_key ./deploy_key.pub     # 贴完就删掉本地私钥
+```
+
+### 部署脚本的行为
+
+`.github/scripts/remote-deploy.sh` 在服务器上执行，流程是：
+
+1. 解包到 `releases/<时间戳>-<短SHA>/` —— **新版本目录，不影响正在运行的版本**
+2. 写入该版本的 `.env`（含 token，权限 600）
+3. `ln -sfn` **原子切换** `current` 软链
+4. 重启 `licore-website` 服务（systemd 用户级/系统级 → pm2 依次尝试）
+5. 健康检查最多等 30 秒，失败即判定部署失败
+6. 只保留最近 5 个版本，自动清理旧的
+
+**回滚**（一条命令，秒级）：
+
+```bash
+cd /opt/licore-website
+ln -sfn releases/<上一个版本目录> current
+sudo systemctl restart licore-website
+```
+
+---
+
+## 四、部署到服务器
 
 ### 方式一：PM2（推荐）
 
@@ -203,7 +287,7 @@ server {
 
 ---
 
-## 四、SEO 实现清单
+## 五、SEO 实现清单
 
 | 项目 | 实现位置 | 说明 |
 | --- | --- | --- |
@@ -225,7 +309,7 @@ server {
 
 ---
 
-## 五、目录结构
+## 六、目录结构
 
 ```
 .
@@ -258,13 +342,19 @@ server {
 │       ├── github.ts           # GitHub 数据层（缓存 / 去重 / 回退）
 │       └── changelog.ts        # 更新日志与下载项聚合
 ├── public/                     # logo、favicon、og.svg、robots.txt、manifest
+├── .github/
+│   ├── workflows/
+│   │   ├── ci.yml              # 类型检查 + 构建 + 冒烟测试
+│   │   └── deploy.yml          # 部署到服务器
+│   └── scripts/
+│       └── remote-deploy.sh    # 服务器端部署脚本（原子切换 + 回滚）
 ├── nuxt.config.ts
 └── package.json
 ```
 
 ---
 
-## 六、运维与排查
+## 七、运维与排查
 
 ### 健康检查
 
@@ -308,7 +398,7 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 
 ---
 
-## 七、技术栈
+## 八、技术栈
 
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
@@ -322,7 +412,7 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 
 ---
 
-## 八、许可
+## 九、许可
 
 本站为 LiCore 项目的展示站点。LiCore 本身以 **AGPL-3.0-only** 分发，
 版权归 LiStudioorg 所有。
