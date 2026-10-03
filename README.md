@@ -353,6 +353,8 @@ server {
 │       ├── github.ts           # GitHub 数据层（缓存 / 去重 / 回退）
 │       └── changelog.ts        # 更新日志与下载项聚合
 ├── public/                     # logo、favicon、og.svg、robots.txt、manifest
+├── MAINTENANCE.md              # 给 AI 代理的维护手册（内容同步工作流）
+├── DEPLOY.md                   # 部署指南
 ├── deploy/
 │   ├── install.sh              # 服务器端一键安装脚本
 │   └── licore-website.service  # systemd 单元模板
@@ -412,7 +414,25 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 
 ---
 
-## 八、技术栈
+## 八、内容维护
+
+官网的**文档类内容**（首页特性卡、文档页命令表、关于页描述）是手写的，
+会随上游 [LiStudioorg/licore](https://github.com/LiStudioorg/licore) 演进变旧。
+
+仓库提供 **[MAINTENANCE.md](./MAINTENANCE.md)** —— 一份**写给 AI 代理的操作手册**。
+你只需对 AI 说一句"按 MAINTENANCE.md 同步一下上游内容"，它就会：
+
+1. 从上游拉取 README、提交记录、tag
+2. 按文档里的解析规则比对差异（特性列表 / 命令表 / 技术细节）
+3. 只改该改的位置，并跑类型检查 + 构建 + 冒烟测试
+4. 如实报告改了什么、没改什么、哪些无法确认
+
+> **版本号与下载链接不在维护范围内** —— 那部分由站点运行时自动从 GitHub 聚合
+> （每 5 分钟刷新），永远是最新的，不需要人工介入。
+
+---
+
+## 九、技术栈
 
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
@@ -426,7 +446,7 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 
 ---
 
-## 九、许可
+## 十、许可
 
 本站为 LiCore 项目的展示站点。LiCore 本身以 **AGPL-3.0-only** 分发，
 版权归 LiStudioorg 所有。

@@ -54,9 +54,11 @@ jobs:
 
       - name: 冒烟测试（启动产物并检查路由）
         env:
-          # 显式指定端口，避免与 runner 上其他服务冲突
+          # 显式指定端口。runner 是干净环境，3001 可用；
+          # 若将来冲突，改这里一处即可（下面断言也用同一变量）
           PORT: 3001
           HOST: 127.0.0.1
+          TEST_URL: http://127.0.0.1:3001
         run: |
           set -euo pipefail
           node .output/server/index.mjs &
@@ -66,7 +68,7 @@ jobs:
 
           echo "等待服务就绪…"
           for i in $(seq 1 30); do
-            if curl -sf -o /dev/null http://127.0.0.1:3001/; then
+            if curl -sf -o /dev/null "$TEST_URL/"; then
               echo "服务已就绪"
               break
             fi
@@ -82,7 +84,7 @@ jobs:
           # 所以这里断言 200 是合理的，而不是断言页面里必须有实时数据。
           FAIL=0
           for path in / /changelog /download /docs /about /sitemap.xml /robots.txt; do
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:3001${path}")
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "${TEST_URL}${path}")
             if [ "$CODE" = "200" ]; then
               echo "  ✓ ${path} → ${CODE}"
             else
@@ -93,7 +95,7 @@ jobs:
 
           # 关键 SEO 标签必须存在
           echo "检查 SEO 标签…"
-          HTML=$(curl -s http://127.0.0.1:3001/)
+          HTML=$(curl -s "$TEST_URL/")
           for needle in '<title>' 'rel="canonical"' 'og:title' 'application/ld+json' 'name="description"'; do
             if echo "$HTML" | grep -q "$needle"; then
               echo "  ✓ ${needle}"
