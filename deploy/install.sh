@@ -3,7 +3,8 @@
 # LiCore 官网服务器端一键安装脚本。
 #
 # 作用：创建目录结构、生成并安装 systemd 服务、引导你填入环境变量。
-# 不会自动拉代码 —— 代码由 GitHub Actions 部署，或你手动首次构建（见 --manual）。
+# 不会自动拉代码 —— 本仓库没有自动部署工作流，更新代码请看 DEPLOY.md 第 4 节，
+# 或首次安装时直接用 --manual 在本机构建（见 usage）。
 #
 #   sudo bash deploy/install.sh
 #   sudo bash deploy/install.sh --app-dir /opt/licore-website --port 3000 --user www-data
@@ -84,8 +85,9 @@ install -d -o "$RUN_USER" -g "$RUN_USER" -m 755 "$APP_DIR"
 install -d -o "$RUN_USER" -g "$RUN_USER" -m 755 "$APP_DIR/releases"
 
 # 2. 环境变量文件。
-#    部署脚本每次发布都会在版本目录内重写 .env；这里为"手动首次部署"准备一份。
-#    放在 APP_DIR/.env 作为模板，首次手动部署时复制进版本目录。
+#    systemd 的 EnvironmentFile 读取版本目录内的 .env；这里在 $APP_DIR/.env
+#    维护一份模板，--manual 首次部署时复制进版本目录。
+#    后续手动更新版本（DEPLOY.md 第 4 节）时，请从这份模板重新生成版本级 .env。
 if [[ -n "$GITHUB_TOKEN_VALUE" ]]; then
   TOKEN_LINE="GITHUB_TOKEN=$GITHUB_TOKEN_VALUE"
 elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
@@ -94,11 +96,30 @@ else
   TOKEN_LINE="GITHUB_TOKEN="
 fi
 
+# 2.5 站点配置文件（TOML）。所有版本共用 $APP_DIR/licore-site.toml 这一份，
+#     通过 LICORE_SITE_CONFIG 指过去 —— 改配置、重启服务即生效，
+#     不用跟着 releases/ 目录一份份复制。
+#     ⚠ 文件里含后台面板密码（按需求为明文），权限必须 600。
+CONFIG_DST="$APP_DIR/licore-site.toml"
+CONFIG_SRC="$REPO_ROOT/licore-site.toml"
+if [[ ! -f "$CONFIG_DST" ]]; then
+  if [[ -f "$CONFIG_SRC" ]]; then
+    cp "$CONFIG_SRC" "$CONFIG_DST"
+  else
+    # 源码里也没有：写一个空壳，让站点用内置默认值，运维后续自行填写
+    printf '# LiCore 官网配置（本文件由 install.sh 生成骨架）\n# 完整字段说明见仓库里的 licore-site.toml\n' > "$CONFIG_DST"
+  fi
+  echo "已准备站点配置：$CONFIG_DST（含后台密码，已设 600；部署后请改掉 [admin] 默认密码）"
+fi
+chown "$RUN_USER:$RUN_USER" "$CONFIG_DST"
+chmod 600 "$CONFIG_DST"
+
 cat > "$APP_DIR/.env" <<EOF
 NODE_ENV=production
 PORT=$APP_PORT
 HOST=127.0.0.1
 NUXT_PUBLIC_SITE_URL=$SITE_URL
+LICORE_SITE_CONFIG=$CONFIG_DST
 $TOKEN_LINE
 EOF
 chown "$RUN_USER:$RUN_USER" "$APP_DIR/.env"
@@ -157,8 +178,8 @@ fi
 if [[ ! -e "$APP_DIR/current" ]]; then
   echo
   echo "⚠ $APP_DIR/current 尚不存在。两种方式二选一："
-  echo "   a) 推送代码到 GitHub，等 Actions 自动部署；"
-  echo "   b) 在本项目目录执行：sudo bash deploy/install.sh --manual"
+  echo "   a) 在本项目目录执行：sudo bash deploy/install.sh --manual"
+  echo "   b) 按 DEPLOY.md 第 4 节手动发布一个版本（构建 + 切软链）。"
   echo "  在 current 就位之前，服务启动会失败（这是预期行为）。"
 else
   systemctl enable --now licore-website
@@ -218,10 +239,11 @@ cat <<EOF
   3. journalctl -u licore-website -f        # 看日志
   4. curl -I http://127.0.0.1:$APP_PORT/    # 本机自测
 
-要启用 GitHub Actions 自动部署，请在仓库设置这些 Secrets：
-  DEPLOY_HOST / DEPLOY_USER / DEPLOY_SSH_KEY / DEPLOY_KNOWN_HOSTS / DEPLOY_PATH=$APP_DIR
-  以及可选 LICORE_GITHUB_TOKEN
-并新建 Variable：DEPLOY_ENABLED=true、APP_PORT=$APP_PORT
+⚠ 请立即修改站点配置 $CONFIG_DST 里的 [admin].password（默认 admin），
+  改完执行 systemctl restart licore-website 生效。
+  站点配置由 LICORE_SITE_CONFIG 指向该文件，全站共用这一份。
+
+更新版本：本仓库没有自动部署，按 DEPLOY.md 第 4 节手动构建并发布新版本。
 
 回滚：cd $APP_DIR && ln -sfn releases/<上一个版本> current && systemctl restart licore-website
 ═════════════════════════════════════════════════

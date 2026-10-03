@@ -177,85 +177,49 @@ allowCacheClear = true    # 是否允许在面板上一键清缓存
 
 ## 三、GitHub Actions 自动化
 
-仓库内置两个 workflow：
+仓库内置**一个** workflow：`.github/workflows/ci.yml`。
 
 | 文件 | 触发时机 | 作用 |
 | --- | --- | --- |
-| `.github/workflows/ci.yml` | push / PR 到 `main` | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
-| `.github/workflows/deploy.yml` | CI 成功后 / 手动触发 | 构建并部署到服务器，**原子切换 + 健康检查 + 失败可回滚** |
+| `.github/workflows/ci.yml` | push / PR 到 `main`，或手动触发 | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
+
+> 🚫 **本仓库不含自动部署工作流**（原先的 `deploy.yml` 已删除）。
+> 推送到 `main` **不会**触发任何部署，发布是纯手动的 —— 见下面「四、部署到服务器」。
+> 这样你可以放心推送代码，不必担心线上被自动改动。
 
 ### CI 做了什么
 
-CI 不只是"能编译"，它会真的把 `.output` 跑起来并断言 12 项：
+CI 不只是"能编译"，它会真的把 `.output` 跑起来并断言：
 
-- 7 条路由（`/`、`/changelog`、`/download`、`/docs`、`/about`、`/sitemap.xml`、`/robots.txt`）必须返回 200
+- 8 条路由（`/`、`/changelog`、`/download`、`/docs`、`/about`、`/admin`、`/sitemap.xml`、`/robots.txt`）必须返回 200
 - 5 个 SEO 关键标签必须存在（`<title>`、`canonical`、`og:title`、`description`、JSON-LD）
+- **后台鉴权底线**：未登录访问 `/api/admin/status` 必须 401，错误密码登录必须 401
 
 > 注意：本站是 SSR 动态站点，**即使 GitHub 上游不可达，页面也会降级渲染并返回 200**。
 > 所以断言 200 是合理的，而不是断言页面里必须有实时数据 —— 否则上游一限流 CI 就会红。
+>
+> 鉴权断言则相反：它断言的是**必须失败**。一旦有人把后台鉴权改坏（比如漏掉
+> 登录校验），路由仍是 200、页面看起来一切正常，只有这条断言能让 CI 变红。
 
-### 启用自动部署
+### 如何发布
 
-部署默认是**关闭**的，避免你还没配好 Secrets 就一路报错。启用步骤：
-
-**1. 配置 Secrets**（仓库 Settings → Secrets and variables → Actions → Secrets）
-
-| Secret | 必需 | 说明 |
-| --- | --- | --- |
-| `DEPLOY_HOST` | ✅ | 服务器地址 |
-| `DEPLOY_USER` | ✅ | SSH 用户名 |
-| `DEPLOY_SSH_KEY` | ✅ | 部署用私钥（**建议单独生成一把，别用你日常的密钥**） |
-| `DEPLOY_KNOWN_HOSTS` | ✅ | `ssh-keyscan your-server` 的输出，用于固定主机指纹 |
-| `DEPLOY_PATH` | ✅ | 应用根目录，例如 `/opt/licore-website` |
-| `DEPLOY_PORT` | ⬜ | SSH 端口，默认 22 |
-| `LICORE_GITHUB_TOKEN` | ⬜ | 提升 GitHub API 配额（强烈建议），只写入服务器，不进仓库 |
-
-**2. 配置 Variables**（同页面的 Variables 标签）
-
-| Variable | 必需 | 说明 |
-| --- | --- | --- |
-| `DEPLOY_ENABLED` | ✅ | 设为 `true` 才会在 CI 成功后自动部署 |
-| `NUXT_PUBLIC_SITE_URL` | ⬜ | 默认 `http://licore.z321.cc.cd` |
-| `APP_PORT` | ⬜ | 应用监听端口，默认 `3000` |
-
-**3. 在服务器上准备目录与服务**
+手动执行，二选一：
 
 ```bash
-sudo mkdir -p /opt/licore-website/releases
-sudo chown -R $USER /opt/licore-website
-```
-
-然后按下面「部署到服务器」一节配置好名为 `licore-website` 的 systemd 服务或 pm2 进程
-（脚本就是靠这个名字重启服务的）。
-
-**4. 生成部署密钥**
-
-```bash
-ssh-keygen -t ed25519 -C "licore-website-deploy" -f ./deploy_key -N ""
-ssh-copy-id -i ./deploy_key.pub user@your-server
-# 把 deploy_key 内容贴进 DEPLOY_SSH_KEY
-ssh-keyscan your-server > known_hosts   # 内容贴进 DEPLOY_KNOWN_HOSTS
-rm -f ./deploy_key ./deploy_key.pub     # 贴完就删掉本地私钥
-```
-
-### 部署脚本的行为
-
-`.github/scripts/remote-deploy.sh` 在服务器上执行，流程是：
-
-1. 解包到 `releases/<时间戳>-<短SHA>/` —— **新版本目录，不影响正在运行的版本**
-2. 写入该版本的 `.env`（含 token，权限 600）
-3. `ln -sfn` **原子切换** `current` 软链
-4. 重启 `licore-website` 服务（systemd 用户级/系统级 → pm2 依次尝试）
-5. 健康检查最多等 30 秒，失败即判定部署失败
-6. 只保留最近 5 个版本，自动清理旧的
-
-**回滚**（一条命令，秒级）：
-
-```bash
+# 方式 A：在服务器上直接构建（推荐，最简单）
 cd /opt/licore-website
-ln -sfn releases/<上一个版本目录> current
-sudo systemctl restart licore-website
+git pull                     # 或上传新的源码包
+npm ci && npm run build
+sudo systemctl restart licore-website   # 或 pm2 restart licore-website
+
+# 方式 B：本地构建后把产物传上去
+npm ci && npm run build
+rsync -av --delete .output/ user@server:/opt/licore-website/current/.output/
+ssh user@server 'sudo systemctl restart licore-website'
 ```
+
+> 首次部署请看 [DEPLOY.md](./DEPLOY.md)，`deploy/install.sh` 会帮你把目录、
+> systemd 服务和 Nginx 都配好。
 
 ---
 
@@ -271,6 +235,7 @@ sudo systemctl restart licore-website
 | --- | --- |
 | `deploy/install.sh` | 服务器端一键安装：建目录、装 systemd 服务、可选首次构建、可选配 Nginx |
 | `deploy/licore-website.service` | systemd 单元模板（`__APP_DIR__` / `__NODE_BIN__` 由安装脚本替换） |
+| `deploy/ecosystem.config.cjs` | PM2 进程配置（配合 `current` 软链做版本化部署） |
 
 ### 方式一：PM2（推荐）
 
@@ -455,13 +420,11 @@ server {
 ├── DEPLOY.md                   # 部署指南
 ├── deploy/
 │   ├── install.sh              # 服务器端一键安装脚本
-│   └── licore-website.service  # systemd 单元模板
+│   ├── licore-website.service  # systemd 单元模板
+│   └── ecosystem.config.cjs    # PM2 进程配置
 ├── .github/
-│   ├── workflows/
-│   │   ├── ci.yml              # 类型检查 + 构建 + 冒烟测试
-│   │   └── deploy.yml          # 部署到服务器
-│   └── scripts/
-│       └── remote-deploy.sh    # 服务器端部署脚本（原子切换 + 回滚）
+│   └── workflows/
+│       └── ci.yml              # 类型检查 + 构建 + 冒烟测试 + 鉴权断言
 ├── nuxt.config.ts
 └── package.json
 ```

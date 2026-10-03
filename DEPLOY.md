@@ -10,8 +10,8 @@
 
 1. [架构：部署后长什么样](#1-架构部署后长什么样)
 2. [准备工作](#2-准备工作)
-3. [方式 A：GitHub Actions 自动部署（推荐）](#3-方式-agithub-actions-自动部署推荐)
-4. [方式 B：服务器上手动部署](#4-方式-b服务器上手动部署)
+3. [方式 A：服务器上一键安装（推荐）](#3-方式-a服务器上一键安装推荐)
+4. [方式 B：纯手动部署（更新版本时用）](#4-方式-b纯手动部署更新版本时用)
 5. [配置 Nginx 与域名](#5-配置-nginx-与域名)
 6. [验证部署](#6-验证部署)
 7. [日常运维](#7-日常运维)
@@ -30,7 +30,9 @@
 │   │   ├── package.json
 │   │   └── .env                    ← 该版本的环境变量（含 token，权限 600）
 │   └── 20261003-130000-def5678/    ← 新版本
-└── current -> releases/20261003-130000-def5678   ← 软链，指向正在跑的版本
+├── current -> releases/20261003-130000-def5678   ← 软链，指向正在跑的版本
+├── .env                            ← 环境变量模板（install.sh 维护）
+└── licore-site.toml                ← 站点配置（全站共用一份，LICORE_SITE_CONFIG 指过来）
 ```
 
 部署 = 解包新版本目录 + **原子切换 current 软链** + 重启服务。
@@ -58,7 +60,8 @@ Nginx 负责域名、静态资源缓存、TLS；Node 负责 SSR 渲染与从 Git
 | 其他 | git、curl、nginx（可选） |
 
 > 内存不足是最常见的失败原因。如果你打算在服务器上直接构建，**至少 2 GB**，
-> 否则 npm ci / nuxt build 会被 OOM killer 杀掉。内存小就用方式 A（在 GitHub 上构建）。
+> 否则 npm ci / nuxt build 会被 OOM killer 杀掉。内存小就在本地构建后只传 `.output`
+> 产物（见第 4 节末尾），或临时加 swap。
 
 ### 安装 Node.js 22
 
@@ -83,25 +86,12 @@ node -v    # 应输出 v22.x 或更高
 
 ---
 
-## 3. 方式 A：GitHub Actions 自动部署（推荐）
+## 3. 方式 A：服务器上一键安装（推荐）
 
-**优点**：在 GitHub 的机器上构建，你不占服务器内存；推送即部署；自带原子切换与回滚。
+**优点**：不需要在 GitHub 上配任何 Secrets，服务器上一条命令跑完。
+零依赖，也不占你本地机器的资源。
 
-### 3.1 生成部署专用密钥
-
-在你自己的电脑上执行（**不要**在服务器上生成后传来传去）：
-
-```bash
-ssh-keygen -t ed25519 -C "licore-website-deploy" -f ./deploy_key -N ""
-
-# 把公钥装到服务器
-ssh-copy-id -i ./deploy_key.pub 用户名@你的服务器IP
-
-# 记录服务器指纹（防中间人）
-ssh-keyscan 你的服务器IP > ./known_hosts
-```
-
-### 3.2 在服务器上初始化目录
+### 3.1 在服务器上准备目录
 
 ```bash
 # 用哪个用户跑服务？下面用 www-data 举例，也可以是你自己的账号
@@ -109,7 +99,7 @@ sudo mkdir -p /opt/licore-website/releases
 sudo chown -R www-data:www-data /opt/licore-website
 ```
 
-### 3.3 在服务器上安装 systemd 服务
+### 3.2 安装 systemd 服务
 
 把仓库里的 `deploy/` 目录传上去（或手动创建），然后：
 
@@ -130,45 +120,30 @@ sudo systemctl daemon-reload
 > 此时**不要** `systemctl start` —— `current` 软链还不存在，启动了必然失败。
 > 等第一次部署完成后脚本会自动启动它。
 
-### 3.4 在 GitHub 仓库配置 Secrets 和 Variables
-
-进入仓库 **Settings → Secrets and variables → Actions**。
-
-**Secrets 标签**（敏感信息）：
-
-| 名称 | 值 |
-| --- | --- |
-| `DEPLOY_HOST` | 服务器 IP 或域名 |
-| `DEPLOY_USER` | SSH 用户名（如 `www-data` 或你自己的账号） |
-| `DEPLOY_SSH_KEY` | 上一步 `deploy_key` 文件的**完整内容** |
-| `DEPLOY_KNOWN_HOSTS` | 上一步 `known_hosts` 文件的完整内容 |
-| `DEPLOY_PATH` | `/opt/licore-website` |
-| `DEPLOY_PORT` | SSH 端口，默认 22，可留空 |
-| `LICORE_GITHUB_TOKEN` | 第 2 步拿到的 token（强烈建议） |
-
-**Variables 标签**（非敏感）：
-
-| 名称 | 值 |
-| --- | --- |
-| `DEPLOY_ENABLED` | `true` ← **不设这个不会自动部署** |
-| `NUXT_PUBLIC_SITE_URL` | `http://licore.z321.cc.cd` |
-| `APP_PORT` | `3000` |
-
-### 3.5 触发部署
-
-推一个 commit 到 `main`，或者到 **Actions → Deploy → Run workflow** 手动触发。
-
-部署成功后删除本地私钥：
+### 3.3 执行首次部署
 
 ```bash
-rm -f ./deploy_key ./deploy_key.pub
+# 在源码目录（含 deploy/ 的那一层）
+# --manual 会在本机执行 npm ci + npm run build 并发布第一个版本
+sudo bash deploy/install.sh \
+  --app-dir /opt/licore-website \
+  --user www-data \
+  --port 3000 \
+  --token '你的_GITHUB_TOKEN' \
+  --manual
 ```
+
+`--manual` 做的事：构建 → 拷 `.output` 到 `releases/manual-<时间戳>/` → 切换 `current` →
+`systemctl enable --now licore-website`。
+
+装完后访问 `http://服务器IP:3000` 验证，再继续第 5 节配 Nginx。
 
 ---
 
-## 4. 方式 B：服务器上手动部署
+## 4. 方式 B：纯手动部署（更新版本时用）
 
-**适用**：不想配 CI，或想在服务器上直接跑。
+部署结构是版本化的：每个版本一个目录，用 `current` 软链指向正在跑的版本。
+这样**回滚只需重切软链**（见第 8 节），也不用担心更新到一半服务挂掉。
 
 ```bash
 # 1. 装依赖（Node 22+、git、curl）
@@ -178,28 +153,41 @@ sudo apt update && sudo apt install -y git curl
 sudo git clone https://github.com/LiStudioorg/licore-door.git /opt/licore-website-src
 cd /opt/licore-website-src
 
-# 3. 一键安装并构建
-#    --manual 会在本机执行 npm ci + npm run build 并发布第一个版本
-sudo bash deploy/install.sh \
-  --app-dir /opt/licore-website \
-  --user "$USER" \
-  --port 3000 \
-  --token '你的_GITHUB_TOKEN' \
-  --manual
+# 3. 构建
+npm ci
+npm run build
+
+# 4. 发布成一个新版本目录
+RELEASE=/opt/licore-website/releases/$(date -u +%Y%m%d-%H%M%S)
+sudo mkdir -p "$RELEASE"
+sudo cp -r .output package.json "$RELEASE/"
+
+# 5. 写该版本的环境变量（权限收紧，里面可能含 token）
+sudo tee "$RELEASE/.env" > /dev/null <<'EOF'
+NODE_ENV=production
+PORT=3000
+HOST=127.0.0.1
+NUXT_PUBLIC_SITE_URL=http://licore.z321.cc.cd
+LICORE_SITE_CONFIG=/opt/licore-website/licore-site.toml
+GITHUB_TOKEN=你的_GITHUB_TOKEN
+EOF
+sudo chmod 600 "$RELEASE/.env"
+
+# 6. 原子切换软链并重启
+sudo ln -sfn "$RELEASE" /opt/licore-website/current
+sudo systemctl restart licore-website
+
+# 7. 验证
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/
 ```
 
-`--manual` 做的事：构建 → 拷 `.output` 到 `releases/manual-<时间戳>/` → 切换 `current` →
-`systemctl enable --now licore-website`。
+> **站点配置**放在 `/opt/licore-website/licore-site.toml`（全站共用一份，
+> 由上面的 `LICORE_SITE_CONFIG` 指过来；含后台密码，保持 600 权限）。
+> 改这个文件 + 重启服务即可，不用动代码。`NUXT_PUBLIC_SITE_URL`、`GITHUB_TOKEN`
+> 等环境变量若同时设置，会**覆盖** TOML 里的同名字段。
 
-> **注意**：手动模式部署的版本，后续被 GitHub Actions 部署覆盖是正常的
-> —— Actions 会创建自己的版本目录并切换软链，旧的会按"保留最近 5 个"规则清理。
-
-**没有 `deploy/` 目录时**（比如你只拿了构建产物），可以完全手动：
-
-```bash
-sudo mkdir -p /opt/licore-website/releases/$(date -u +%Y%m%d-%H%M%S)
-# 把 .output 与 package.json 拷进去，写好 .env，切软链，再起服务
-```
+**没有 `deploy/` 目录时**（比如你只拿了构建产物），第 4 步之后的部分就是全部所需操作 ——
+不需要 `install.sh`，手动建目录、拷产物、写 `.env`、切软链、起服务即可。
 
 ---
 
@@ -359,11 +347,10 @@ curl -I http://127.0.0.1:3000/
 | `EADDRINUSE: address already in use` | 端口被占。`ss -ltnp \| grep 3000` 查凶手，或换 `APP_PORT` |
 | 502 Bad Gateway | Node 没跑起来。`systemctl status licore-website` + `journalctl -u licore-website -n 50` |
 | 页面打开但实时数据是 `—` | GitHub 配额耗尽或网络不通。查 `curl http://127.0.0.1:3000/api/status`，配 `GITHUB_TOKEN` 解决 |
-| 构建时被 Killed（OOM） | 服务器内存不足。改用方式 A 在 GitHub 上构建，或临时加 swap |
+| 构建时被 Killed（OOM） | 服务器内存不足。临时加 swap，或在本地机器构建后只传 `.output` 产物（见第 4 节末尾） |
 | sitemap/canonical 里是 `127.0.0.1` | `NUXT_PUBLIC_SITE_URL` 没设对。改 `.env` 后重启 |
-| Actions 部署报 `Permission denied` | `DEPLOY_USER` 对 `DEPLOY_PATH` 无写权限，或密钥没装对。检查 `ssh -i deploy_key user@host` 能否登录 |
-| Actions 部署报 `未找到名为 licore-website 的服务` | 服务器上没装 systemd unit，或名字不一致。见第 3.3 步 |
-| Deploy workflow 被跳过 | 没有设 Variable `DEPLOY_ENABLED=true` |
+| `/admin` 登录不上 | 配置文件改了但没重启服务（配置只在启动时读取一次）；或会话过期（默认 12 小时），重新登录 |
+| 更新后页面还是旧内容 | `current` 软链没切到新目录，或重启的不是这个服务。`readlink /opt/licore-website/current` 确认指向 |
 
 **快速诊断命令**：
 
@@ -379,8 +366,9 @@ curl -s http://127.0.0.1:3000/api/status | head -c 300
 
 ## 附：安全建议
 
-- **部署密钥单独生成**，不要复用你日常的 SSH 私钥；GitHub 里删了 Secret 就等于吊销。
+- **`/admin` 的默认密码 `admin` 必须改掉**（`licore-site.toml` 的 `[admin].password`，改完重启服务）。配置文件按需求是明文存密码的，务必 `chmod 600` 且不要把真实密码提交到公开仓库。
 - **`GITHUB_TOKEN` 只给只读权限**；只用公开仓库的话不需要任何写权限。
 - `.env` 权限保持 `600`，属主是运行服务的用户。
 - 服务监听 `127.0.0.1`，**不要**直接暴露 3000 端口到公网，流量都走 Nginx。
+- 站点启用 HTTPS 后，后台会话 cookie 会自动带上 `Secure` 属性，运输层更安全。
 - 定期 `sudo apt update && sudo apt upgrade` 更新系统与 Node。
