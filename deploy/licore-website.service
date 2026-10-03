@@ -1,0 +1,50 @@
+# LiCore 官网 systemd 服务单元
+#
+# 安装（推荐用脚本，会自动替换路径与用户）：
+#   sudo bash deploy/install.sh
+#
+# 或手动：
+#   sudo cp deploy/licore-website.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now licore-website
+#
+# 重要：WorkingDirectory 指向 current 软链，systemd 在启动时解析软链。
+# 因此**切换软链后必须 restart 才能生效** —— deploy 脚本已经这么做了。
+[Unit]
+Description=LiCore Website (Nuxt 4 SSR)
+Documentation=https://github.com/LiStudioorg/licore-door
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# 入口是 current 软链，配合 APP_DIR/releases/ 做版本化部署与秒级回滚
+WorkingDirectory=__APP_DIR__/current
+
+# 环境变量从版本目录的 .env 读取（部署脚本生成，权限 600）
+# token 只落在服务器上，不进仓库、也不写死在这个 unit 里
+EnvironmentFile=__APP_DIR__/current/.env
+
+ExecStart=__NODE_BIN__ .output/server/index.mjs
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+# 让 Node 能收到优雅退出信号
+KillMode=mixed
+TimeoutStopSec=15
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=licore-website
+
+# ---- 加固 ----
+# 注意：不要开 ProtectHome=true。若 APP_DIR 位于 /home 或 /root 下，
+# 该选项会让服务读不到自己的文件。用 ReadWritePaths 精确授权更稳妥。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=__APP_DIR__
+
+[Install]
+WantedBy=multi-user.target

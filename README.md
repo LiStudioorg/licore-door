@@ -172,6 +172,17 @@ sudo systemctl restart licore-website
 
 ## 四、部署到服务器
 
+> 📘 **完整的部署步骤请看 [DEPLOY.md](./DEPLOY.md)** —— 包含服务器准备、
+> 两种部署方式、Nginx/HTTPS 配置、验证清单、回滚与故障排查表。
+> 本节的 `deploy/` 目录提供可直接使用的 systemd unit 与安装脚本。
+
+仓库内提供了部署资产：
+
+| 文件 | 用途 |
+| --- | --- |
+| `deploy/install.sh` | 服务器端一键安装：建目录、装 systemd 服务、可选首次构建、可选配 Nginx |
+| `deploy/licore-website.service` | systemd 单元模板（`__APP_DIR__` / `__NODE_BIN__` 由安装脚本替换） |
+
 ### 方式一：PM2（推荐）
 
 ```bash
@@ -342,6 +353,9 @@ server {
 │       ├── github.ts           # GitHub 数据层（缓存 / 去重 / 回退）
 │       └── changelog.ts        # 更新日志与下载项聚合
 ├── public/                     # logo、favicon、og.svg、robots.txt、manifest
+├── deploy/
+│   ├── install.sh              # 服务器端一键安装脚本
+│   └── licore-website.service  # systemd 单元模板
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml              # 类型检查 + 构建 + 冒烟测试
