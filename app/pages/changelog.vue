@@ -11,19 +11,52 @@ import {
   ExternalLink,
 } from 'lucide-vue-next'
 import { repo, site } from '~/config/site'
-import { buildChangelog, type VersionEntry } from '~~/server/utils/changelog'
-import { RELEASE_TTL_SECONDS } from '~~/server/utils/github'
+import type { ChangelogPayload, VersionEntry } from '~~/server/utils/changelog'
+
+/** /api/changelog 在 ChangelogPayload 之外多带一个 ttlSeconds（页面展示"服务端缓存 N 分钟"） */
+interface ChangelogApi extends ChangelogPayload {
+  ttlSeconds: number
+}
 
 /**
  * 更新日志页。
  * 服务端每次请求都（经 5 分钟缓存）重新聚合 GitHub 上的 tag / Release / commit，
  * 所以无需重新部署，页面就会反映上游最新发布。
+ *
+ * 必须走 useAsyncData + server: true（同首页）：
+ *   - 结果写进 SSR payload，客户端水合不会重跑 loader；
+ *   - 原来直接 `await buildChangelog()` 没有 catch，一旦上游请求失败，
+ *     setup 直接抛错，整页白屏。
  */
-const event = useRequestEvent()!
-const log = await buildChangelog(event)
+const FALLBACK_LOG: ChangelogApi = {
+  versions: [],
+  source: {
+    mode: 'tags-and-commits',
+    hasReleases: false,
+    releaseCount: 0,
+    tagCount: 0,
+    note: '上游暂时无法访问，稍后刷新即可。',
+  },
+  fetchedAt: '',
+  latestVersion: null,
+  ttlSeconds: 300,
+}
+
+const { data: logData } = await useAsyncData<ChangelogApi | null>(
+  'changelog-data',
+  () => $fetch<ChangelogApi>('/api/changelog').catch(() => null),
+  { server: true },
+)
+
+const log = logData.value ?? FALLBACK_LOG
 
 const versions = log.versions
 const allItems = versions.flatMap((v) => v.changes.items)
+
+/** 兜底时间戳为空时 new Date('') 会得到 Invalid Date，模板里直接格式化会打印 "Invalid Date" */
+const fetchedAtText = log.fetchedAt
+  ? `${formatDate(log.fetchedAt)} ${new Date(log.fetchedAt).toLocaleTimeString('zh-CN')}`
+  : '尚未同步'
 
 const keyword = ref('')
 const typeFilter = ref<string>('all')
@@ -183,9 +216,8 @@ useHead({
           <p>
             {{ log.source.note }}
             <span class="mt-1 block">
-              最近一次同步：{{ formatDate(log.fetchedAt) }}
-              {{ new Date(log.fetchedAt).toLocaleTimeString('zh-CN') }}
-              · 服务端缓存 {{ Math.round(RELEASE_TTL_SECONDS / 60) }} 分钟
+              最近一次同步：{{ fetchedAtText }}
+              · 服务端缓存 {{ Math.round(log.ttlSeconds / 60) }} 分钟
             </span>
           </p>
         </div>
@@ -315,12 +347,11 @@ useHead({
               <strong class="text-foreground">{{ log.latestVersion ?? '未知' }}</strong
               >。
             </p>
-            <Button as="a" href="/download" variant="primary" size="sm" class="mt-4 w-full">
+            <LinkButton href="/download" variant="primary" size="sm" class="mt-4 w-full">
               <Download class="mr-1.5 size-3.5" />
               前往下载页
-            </Button>
-            <Button
-              as="a"
+            </LinkButton>
+            <LinkButton
               :href="`${repo.url}/releases`"
               target="_blank"
               rel="noopener noreferrer"
@@ -330,7 +361,7 @@ useHead({
             >
               <Github class="mr-1.5 size-3.5" />
               GitHub Releases
-            </Button>
+            </LinkButton>
           </Card>
 
           <!-- 上游提交 -->

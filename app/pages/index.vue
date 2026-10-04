@@ -17,18 +17,46 @@ import {
   CheckCircle2,
 } from 'lucide-vue-next'
 import { repo, site } from '~/config/site'
-import { buildChangelog } from '~~/server/utils/changelog'
-import { getCommits, getRepoMeta } from '~~/server/utils/github'
+import type { ChangelogPayload } from '~~/server/utils/changelog'
+import type { GitHubCommit, RepoMeta } from '~~/server/utils/github'
 
 /**
  * 首页由服务端渲染，数据在每次请求时（经缓存）从 GitHub 拉取，
  * 因此页面上展示的版本号、提交、star 数始终是上游最新的。
+ *
+ * 走 useAsyncData + server: true，原因：
+ *   1. 结果写进 SSR payload 再转移给客户端，水合时不再重新执行 loader。
+ *      若像普通顶层 await 那样写，客户端水合会再次执行 loader，
+ *      在访客浏览器里直连 api.github.com，消耗该访客 IP 的匿名配额（60 次/小时）；
+ *   2. 客户端那次请求一旦失败，页面会从服务端渲染好的完整数据闪回空状态。
+ *
+ * 数据一律走本站自己的 /api/* 路由，**不直接 import server/utils**：
+ * server/utils 里有 node:fs / process.cwd，一旦被静态引入就会被打进客户端
+ * bundle（即使永远不执行），既是体积浪费，也让 Vite 报 externalized 警告。
+ * 这里的 type import 会被编译器完全擦除，不产生客户端代码。
  */
-const [meta, changelog, commits] = await Promise.all([
-  getRepoMeta(useRequestEvent()!).catch(() => null),
-  buildChangelog(useRequestEvent()!).catch(() => null),
-  getCommits(8, useRequestEvent()!).catch(() => []),
-])
+interface HomeData {
+  meta: RepoMeta | null
+  changelog: ChangelogPayload | null
+  commits: GitHubCommit[]
+}
+
+const { data: homeData } = await useAsyncData<HomeData>('home-data', async () => {
+  const [repoApi, logApi, commitsApi] = await Promise.all([
+    $fetch<{ ok: boolean; repo: RepoMeta } | null>('/api/repo').catch(() => null),
+    $fetch<ChangelogPayload | null>('/api/changelog').catch(() => null),
+    $fetch<{ ok: boolean; commits: GitHubCommit[] } | null>('/api/commits?limit=8').catch(() => null),
+  ])
+  return {
+    meta: repoApi?.repo ?? null,
+    changelog: logApi ?? null,
+    commits: commitsApi?.commits ?? [],
+  }
+}, { server: true })
+
+const meta = homeData.value?.meta ?? null
+const changelog = homeData.value?.changelog ?? null
+const commits = homeData.value?.commits ?? []
 
 const latest = changelog?.versions?.[0] ?? null
 const releaseCount = changelog?.source.releaseCount ?? 0
@@ -37,8 +65,13 @@ const tagCount = changelog?.source.tagCount ?? 0
 /* ---------------- SEO ---------------- */
 /** 首页标题即站名，用绝对标题避免 titleTemplate 再拼一次 LiCore */
 const title = `${site.name} — ${site.tagline}`
+/**
+ * 注意：不要再把整段 site.description 拼上版本信息 —— 那样总长会到 180+ 字符，
+ * 超出 Google 截断线（约 155–160），搜索摘要会被直接砍掉后半句。
+ * 这里单独写一版短描述，版本信息只占一行。
+ */
 const description = latest
-  ? `${site.description} 当前最新版本 ${latest.version}${latest.date ? `（${formatDate(latest.date)} 发布）` : ''}，官网更新日志与下载链接自动同步自 GitHub。`
+  ? `LiCore — 用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发、运行时内存目标 10–20 MiB、自研 .licore 镜像格式。最新版本 ${latest.version}${latest.date ? `（${formatDate(latest.date)} 发布）` : ''}，更新日志与下载链接自动同步自 GitHub。`
   : site.description
 
 useSeoMeta({
@@ -223,16 +256,15 @@ const TYPE_COLORS: Record<string, string> = {
           </p>
 
           <div class="mt-9 flex flex-wrap items-center justify-center gap-3">
-            <Button as="a" href="/download" size="lg">
+            <LinkButton href="/download" size="lg">
               <Download class="mr-2 size-4" />
               下载 LiCore
-            </Button>
-            <Button as="a" href="/docs" variant="outline" size="lg">
+            </LinkButton>
+            <LinkButton href="/docs" variant="outline" size="lg">
               阅读文档
               <ArrowRight class="ml-2 size-4" />
-            </Button>
-            <Button
-              as="a"
+            </LinkButton>
+            <LinkButton
               :href="repo.url"
               target="_blank"
               rel="noopener noreferrer"
@@ -241,7 +273,7 @@ const TYPE_COLORS: Record<string, string> = {
             >
               GitHub
               <ExternalLink class="ml-2 size-4" />
-            </Button>
+            </LinkButton>
           </div>
 
           <p v-if="latest?.date" class="mt-5 text-xs text-muted-foreground">
@@ -291,8 +323,8 @@ const TYPE_COLORS: Record<string, string> = {
             </li>
           </ul>
           <div class="mt-8 flex flex-wrap gap-3">
-            <Button as="a" href="/docs" variant="primary">查看完整命令树</Button>
-            <Button as="a" href="/changelog" variant="outline">浏览更新日志</Button>
+            <LinkButton href="/docs" variant="primary">查看完整命令树</LinkButton>
+            <LinkButton href="/changelog" variant="outline">浏览更新日志</LinkButton>
           </div>
         </div>
 
@@ -451,11 +483,11 @@ const TYPE_COLORS: Record<string, string> = {
             全部版本与下载链接均自动同步自 GitHub 仓库。
           </p>
           <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Button as="a" href="/download" size="lg">
+            <LinkButton href="/download" size="lg">
               <Download class="mr-2 size-4" />
               前往下载
-            </Button>
-            <Button as="a" href="/changelog" variant="outline" size="lg">查看更新日志</Button>
+            </LinkButton>
+            <LinkButton href="/changelog" variant="outline" size="lg">查看更新日志</LinkButton>
           </div>
         </div>
       </div>

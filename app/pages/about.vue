@@ -14,16 +14,38 @@ import {
   Server,
 } from 'lucide-vue-next'
 import { repo, site } from '~/config/site'
-import { getContributors, getRepoMeta, getCommits } from '~~/server/utils/github'
-import { buildChangelog } from '~~/server/utils/changelog'
+import type { Contributor, GitHubCommit, RepoMeta } from '~~/server/utils/github'
+import type { ChangelogPayload } from '~~/server/utils/changelog'
 
-const event = useRequestEvent()!
-const [meta, contributors, commits, changelog] = await Promise.all([
-  getRepoMeta(event).catch(() => null),
-  getContributors(event).catch(() => []),
-  getCommits(5, event).catch(() => []),
-  buildChangelog(event).catch(() => null),
-])
+/**
+ * 同首页：走 useAsyncData + server: true，客户端水合不重跑 loader；
+ * 数据一律走本站 /api/* 路由，不直接 import server/utils（见首页注释）。
+ */
+interface AboutData {
+  meta: RepoMeta | null
+  contributors: Contributor[]
+  commits: GitHubCommit[]
+  changelog: ChangelogPayload | null
+}
+
+const { data: aboutData } = await useAsyncData<AboutData>('about-data', async () => {
+  const [repoApi, commitsApi, logApi] = await Promise.all([
+    $fetch<{ ok: boolean; repo: RepoMeta; contributors: Contributor[] } | null>('/api/repo').catch(() => null),
+    $fetch<{ ok: boolean; commits: GitHubCommit[] } | null>('/api/commits?limit=5').catch(() => null),
+    $fetch<ChangelogPayload | null>('/api/changelog').catch(() => null),
+  ])
+  return {
+    meta: repoApi?.repo ?? null,
+    contributors: repoApi?.contributors ?? [],
+    commits: commitsApi?.commits ?? [],
+    changelog: logApi ?? null,
+  }
+}, { server: true })
+
+const meta = aboutData.value?.meta ?? null
+const contributors = aboutData.value?.contributors ?? []
+const commits = aboutData.value?.commits ?? []
+const changelog = aboutData.value?.changelog ?? null
 
 const facts = computed(() => [
   { icon: Star, label: 'Stars', value: meta ? formatNumber(meta.stars) : '—' },
@@ -244,8 +266,7 @@ useHead({
             </p>
             <pre class="code-block mt-4"><code>// Copyright (C) 2026 LiStudioorg
 // SPDX-License-Identifier: AGPL-3.0-only</code></pre>
-            <Button
-              as="a"
+            <LinkButton
               :href="`${repo.url}/blob/main/LICENSE`"
               target="_blank"
               rel="noopener noreferrer"
@@ -255,7 +276,7 @@ useHead({
             >
               阅读完整协议
               <ExternalLink class="ml-1.5 size-3.5" />
-            </Button>
+            </LinkButton>
           </section>
 
           <!-- 参与贡献 -->
@@ -274,24 +295,22 @@ useHead({
               >。
             </p>
             <div class="mt-5 flex flex-wrap gap-3">
-              <Button
-                as="a"
+              <LinkButton
                 :href="`${repo.url}/issues`"
                 target="_blank"
                 rel="noopener noreferrer"
                 variant="primary"
               >
                 提交 Issue
-              </Button>
-              <Button
-                as="a"
+              </LinkButton>
+              <LinkButton
                 :href="`${repo.url}/blob/main/AGENTS.md`"
                 target="_blank"
                 rel="noopener noreferrer"
                 variant="outline"
               >
                 协作者指南
-              </Button>
+              </LinkButton>
             </div>
           </section>
 
@@ -399,8 +418,7 @@ useHead({
             <p class="mt-2 text-xs leading-5 text-muted-foreground">
               给仓库点个 Star 是最直接的支持方式，也能让更多人发现这个项目。
             </p>
-            <Button
-              as="a"
+            <LinkButton
               :href="repo.url"
               target="_blank"
               rel="noopener noreferrer"
@@ -409,7 +427,7 @@ useHead({
             >
               <Star class="mr-1.5 size-3.5" />
               去 GitHub 加 Star
-            </Button>
+            </LinkButton>
           </Card>
         </aside>
       </div>

@@ -15,15 +15,49 @@ import {
   Package,
 } from 'lucide-vue-next'
 import { repo, site, buildMatrix } from '~/config/site'
-import { buildDownloads } from '~~/server/utils/changelog'
+import type { ChangelogPayload, VersionEntry } from '~~/server/utils/changelog'
+import type { RepoMeta } from '~~/server/utils/github'
+
+/** /api/downloads 的返回结构（type import 会被擦除，不进客户端 bundle） */
+interface DownloadsPayload {
+  latest: VersionEntry | null
+  versions: VersionEntry[]
+  source: ChangelogPayload['source']
+  repo: RepoMeta | null
+  fetchedAt: string
+  ttlSeconds: number
+}
 
 /**
  * 下载页。服务端实时聚合上游可用的下载项：
  *   - 上游有 Release 资产 → 直接给官方二进制；
  *   - 没有 → 自动回退为源码归档 + 编译指引，并如实说明。
+ *
+ * 同首页：走 useAsyncData + server: true 且必须 catch。
+ * 原来的 `await buildDownloads(event)` 没有 catch，上游失败会让 setup 抛错、整页白屏。
  */
-const event = useRequestEvent()!
-const data = await buildDownloads(event)
+const FALLBACK: DownloadsPayload = {
+  latest: null,
+  versions: [],
+  source: {
+    mode: 'tags-and-commits',
+    hasReleases: false,
+    releaseCount: 0,
+    tagCount: 0,
+    note: '上游暂时无法访问，稍后刷新即可。',
+  },
+  repo: null,
+  fetchedAt: '',
+  ttlSeconds: 300,
+}
+
+const { data: downloadsData } = await useAsyncData<DownloadsPayload | null>(
+  'downloads-data',
+  () => $fetch<DownloadsPayload>('/api/downloads').catch(() => null),
+  { server: true },
+)
+
+const data = downloadsData.value ?? FALLBACK
 
 const versions = data.versions
 const latest = data.latest
@@ -82,9 +116,14 @@ const buildSteps = computed(() => [
 ])
 
 /* ---------------- SEO ---------------- */
+/**
+ * 描述必须控制在 155 字符以内，否则 Google 会在搜索结果里直接截断。
+ * 平台清单只取不重复的 OS 名，不要把每个 os/arch 组合都拼进去（会轻松到 230+ 字符）。
+ */
+const platforms = [...new Set(binaries.map((b) => b.os))].join(' / ')
 const description = hasBinaries
-  ? `下载 LiCore ${latest?.version} 官方构建产物，覆盖 ${binaries.map((b) => `${b.os} ${b.arch}`).join(' / ')}。下载链接自动同步自 GitHub Release，同时提供源码编译方式与完整构建矩阵说明。`
-  : `下载 LiCore ${latest?.version ?? '最新版'}。上游当前未提供预编译二进制，本页提供官方源码归档下载与完整的本地编译指引（Linux amd64/arm64、Android arm64）。`
+  ? `下载 LiCore ${latest?.version} 官方构建产物，支持 ${platforms}。下载链接自动同步自 GitHub Release，同时提供源码编译指引与完整构建矩阵说明。`
+  : `下载 LiCore ${latest?.version ?? '最新版'}。上游当前未提供预编译二进制，本页提供官方源码归档下载与本地编译指引（Linux amd64/arm64、Android arm64）。`
 
 useSeoMeta({
   title: '下载',
@@ -413,8 +452,7 @@ useHead({
           <Card>
             <h2 class="text-sm font-semibold">其他获取方式</h2>
             <div class="mt-4 space-y-2">
-              <Button
-                as="a"
+              <LinkButton
                 :href="repo.url"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -424,10 +462,10 @@ useHead({
               >
                 <Github class="mr-1.5 size-3.5" />
                 克隆源码仓库
-              </Button>
-              <Button as="a" href="/changelog" variant="ghost" size="sm" class="w-full">
+              </LinkButton>
+              <LinkButton href="/changelog" variant="ghost" size="sm" class="w-full">
                 查看全部版本
-              </Button>
+              </LinkButton>
             </div>
             <p class="mt-4 text-xs leading-5 text-muted-foreground">
               LiCore 目前未发布到任何包管理器，唯一的官方分发渠道是 GitHub 仓库。
