@@ -16,3 +16,8 @@ licore-site.local.toml
 
 # 运行时 GitHub Token（后台面板写入，含敏感信息，绝不提交）
 licore-runtime-token
+
+# 后台面板保存配置时自动生成的备份。它是服务器上的运行产物，
+# 内容取决于管理员改过什么，不该进版本库。
+licore-site.toml.bak
+*.toml.bak

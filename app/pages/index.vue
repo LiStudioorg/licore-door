@@ -41,11 +41,24 @@ interface HomeData {
   commits: GitHubCommit[]
 }
 
+/** 生效的展示开关（后台面板可改，服务端下发）。模板用它决定是否渲染活动流。 */
+const siteRuntime = useDisplayConfig()
+
 const { data: homeData } = await useAsyncData<HomeData>('home-data', async () => {
+  /**
+   * showActivity 可以在后台面板里关掉；关掉时**不再请求** /api/commits，
+   * 省掉一次上游提交列表调用（匿名配额只有 60 次/小时）。
+   *
+   * 这里必须用 fetchDisplayConfig()（直接取数）而不是 siteRuntime.value ——
+   * 后者是 computed，在本 loader 首次执行时可能还没 resolve。
+   */
+  const runtime = await fetchDisplayConfig()
   const [repoApi, logApi, commitsApi] = await Promise.all([
     $fetch<{ ok: boolean; repo: RepoMeta } | null>('/api/repo').catch(() => null),
     $fetch<ChangelogPayload | null>('/api/changelog').catch(() => null),
-    $fetch<{ ok: boolean; commits: GitHubCommit[] } | null>('/api/commits?limit=8').catch(() => null),
+    runtime.display.showActivity
+      ? $fetch<{ ok: boolean; commits: GitHubCommit[] } | null>('/api/commits?limit=8').catch(() => null)
+      : Promise.resolve(null),
   ])
   return {
     meta: repoApi?.repo ?? null,
@@ -407,8 +420,8 @@ const TYPE_COLORS: Record<string, string> = {
     <!-- ================= 最新动态 ================= -->
     <section class="border-b border-border py-20">
       <div class="site-container grid gap-10 lg:grid-cols-5">
-        <!-- 更新日志预览 -->
-        <div class="lg:col-span-3">
+        <!-- 更新日志预览：活动流关闭时占满整行，避免右侧留白 -->
+        <div :class="siteRuntime.display.showActivity ? 'lg:col-span-3' : 'lg:col-span-5'">
           <div class="flex items-center justify-between gap-4">
             <h2 class="text-2xl font-bold tracking-tight">最新更新</h2>
             <NuxtLink
@@ -458,8 +471,8 @@ const TYPE_COLORS: Record<string, string> = {
           </p>
         </div>
 
-        <!-- 最近提交 -->
-        <div class="lg:col-span-2">
+        <!-- 最近提交（可在后台面板关闭：display.showActivity） -->
+        <div v-if="siteRuntime.display.showActivity" class="lg:col-span-2">
           <h2 class="text-2xl font-bold tracking-tight">开发动态</h2>
 
           <ol v-if="commits.length" class="mt-6 space-y-1">

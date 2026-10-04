@@ -25,8 +25,11 @@ import {
   Loader2,
   LogOut,
   RefreshCw,
+  RotateCcw,
+  Save,
   Server,
   Settings2,
+  SlidersHorizontal,
   Trash2,
   XCircle,
 } from 'lucide-vue-next'
@@ -73,6 +76,7 @@ interface AdminStatus {
       username: string
       sessionHours: number
       allowCacheClear: boolean
+      allowConfigEdit: boolean
       usingDefaultPassword: boolean
     }
     github: {
@@ -81,10 +85,34 @@ interface AdminStatus {
       releasesTtlSeconds: number
       repoTtlSeconds: number
       contributorsTtlSeconds: number
+      effectiveReleaseTtlSeconds: number
     }
     display: { changelogMaxItems: number; showActivity: boolean }
   }
+  /** 可视化编辑：字段清单由服务端下发 */
+  editable: EditableSection[]
+  lastConfigReloadAt: string | null
   now: string
+}
+
+interface EditableField {
+  key: string
+  section: string
+  field: string
+  label: string
+  hint: string
+  type: 'text' | 'url' | 'number' | 'boolean'
+  min?: number
+  max?: number
+  value: string | number | boolean
+  lockedByEnv?: string
+}
+
+interface EditableSection {
+  key: string
+  title: string
+  description: string
+  fields: EditableField[]
 }
 
 /* ---------------- 状态 ---------------- */
@@ -254,6 +282,86 @@ const TOKEN_SOURCE_LABEL: Record<string, string> = {
   runtime: '面板写入',
   toml: 'TOML 配置',
   none: '未配置',
+}
+
+/* ---------------- 配置可视化编辑 ---------------- */
+
+/**
+ * 草稿值：`{ 'site.url': '...' }`。
+ * 只放**被用户改动过**的字段 —— 提交时只发差异，避免把没碰过的字段
+ * 也按面板的格式化结果写回文件（那会平白改动用户手写的格式）。
+ */
+const draft = ref<Record<string, string | number | boolean>>({})
+const configBusy = ref(false)
+const configFlash = reactive({ text: '', kind: 'ok' as 'ok' | 'err' })
+const fieldErrors = ref<Record<string, string>>({})
+
+/** 字段当前值：草稿优先，否则用服务端下发的生效值 */
+function fieldValue(f: EditableField): string | number | boolean {
+  return f.key in draft.value ? draft.value[f.key]! : f.value
+}
+
+/** 与生效值比较，判断是否真的改了 */
+function isDirty(f: EditableField): boolean {
+  if (!(f.key in draft.value)) return false
+  const cur = draft.value[f.key]
+  if (f.type === 'boolean') return Boolean(cur) !== Boolean(f.value)
+  if (f.type === 'number') return Number(cur) !== Number(f.value)
+  return String(cur) !== String(f.value)
+}
+
+const dirtyKeys = computed(() =>
+  (status.value?.editable ?? []).flatMap((s) => s.fields).filter(isDirty).map((f) => f.key),
+)
+
+const hasDirty = computed(() => dirtyKeys.value.length > 0)
+
+function setField(f: EditableField, value: string | number | boolean) {
+  draft.value = { ...draft.value, [f.key]: value }
+  // 用户重新输入时清掉该字段上一次的错误提示
+  if (fieldErrors.value[f.key]) {
+    const next = { ...fieldErrors.value }
+    delete next[f.key]
+    fieldErrors.value = next
+  }
+}
+
+function resetDraft() {
+  draft.value = {}
+  fieldErrors.value = {}
+  configFlash.text = ''
+}
+
+/** 保存草稿：只提交差异字段 */
+async function saveConfig() {
+  if (configBusy.value || !hasDirty.value) return
+  configBusy.value = true
+  configFlash.text = ''
+  fieldErrors.value = {}
+
+  const patch: Record<string, string | number | boolean> = {}
+  for (const key of dirtyKeys.value) patch[key] = draft.value[key]!
+
+  try {
+    const res = await $fetch<{ ok: boolean; message: string; sections: EditableSection[] }>(
+      '/api/admin/config.set',
+      { method: 'POST', body: { patch } },
+    )
+    draft.value = {}
+    await loadStatus()
+    // 展示类字段（display.*）已改变，让页面上的站点配置缓存失效，
+    // 下次进入前台页面会重新取，不会残留旧开关。
+    await clearNuxtData('site-runtime-config')
+    configFlash.text = res.message
+    configFlash.kind = 'ok'
+  } catch (err: any) {
+    const errs = err?.data?.data?.fieldErrors
+    if (errs && typeof errs === 'object') fieldErrors.value = errs
+    configFlash.text = err?.data?.message || '保存失败'
+    configFlash.kind = 'err'
+  } finally {
+    configBusy.value = false
+  }
 }
 
 /** 缓存项剩余新鲜时间 */
@@ -649,9 +757,172 @@ onMounted(loadStatus)
         </dl>
       </Card>
 
-      <p class="text-center text-xs text-muted-foreground">
-        数据抓取于 {{ formatDate(status.now) }} · 版本号与下载链接由站点运行时自动聚合，无需人工维护
-      </p>
+      <!-- ---------------- 配置可视化编辑 ---------------- -->
+      <Card v-if="status.config.admin.allowConfigEdit" class="p-6">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="flex items-center gap-2 text-base font-semibold">
+              <SlidersHorizontal class="size-4 text-primary" aria-hidden="true" />
+              配置编辑
+            </h2>
+            <p class="mt-1 text-xs leading-5 text-muted-foreground">
+              保存后<strong class="font-medium text-foreground">立即生效</strong>，无需重启服务。
+              改动会写回
+              <code class="rounded bg-muted px-1 py-0.5">{{ status.config.path || 'licore-site.toml' }}</code>
+              并自动备份为 <code class="rounded bg-muted px-1 py-0.5">.bak</code>，原有注释保持不变。
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <Button
+              v-if="hasDirty"
+              variant="ghost"
+              size="sm"
+              :icon="RotateCcw"
+              :disabled="configBusy"
+              @click="resetDraft"
+            >
+              放弃修改
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              :icon="Save"
+              :loading="configBusy"
+              :disabled="!hasDirty || configBusy"
+              @click="saveConfig"
+            >
+              保存{{ hasDirty ? ` (${dirtyKeys.length})` : '' }}
+            </Button>
+          </div>
+        </div>
+
+        <p
+          v-if="configFlash.text"
+          class="mt-4 flex items-center gap-2 rounded-md px-3 py-2 text-sm"
+          :class="configFlash.kind === 'ok' ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'"
+          role="status"
+        >
+          <component :is="configFlash.kind === 'ok' ? CheckCircle2 : AlertTriangle" class="size-4 shrink-0" aria-hidden="true" />
+          {{ configFlash.text }}
+        </p>
+
+        <div v-for="sec in status.editable" :key="sec.key" class="mt-6">
+          <div class="border-b border-border pb-2">
+            <h3 class="text-sm font-semibold">{{ sec.title }}</h3>
+            <p v-if="sec.description" class="mt-0.5 text-xs text-muted-foreground">{{ sec.description }}</p>
+          </div>
+
+          <div class="mt-4 grid gap-5 sm:grid-cols-2">
+            <div v-for="f in sec.fields" :key="f.key" :class="f.type === 'text' && f.field === 'icp' ? 'sm:col-span-2' : ''">
+              <label :for="`cfg-${f.key}`" class="mb-1.5 flex items-center gap-2 text-sm font-medium">
+                {{ f.label }}
+                <span
+                  v-if="isDirty(f)"
+                  class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                >
+                  已修改
+                </span>
+              </label>
+
+              <!-- 被环境变量覆盖：只读并说明原因，避免"改了没效果"的困惑 -->
+              <div v-if="f.lockedByEnv" class="space-y-1.5">
+                <Input :id="`cfg-${f.key}`" :model-value="String(fieldValue(f))" disabled />
+                <p class="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                  <AlertTriangle class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  已被环境变量 <code class="rounded bg-black/10 px-1 dark:bg-white/10">{{ f.lockedByEnv }}</code>
+                  覆盖，面板改不动；请改环境变量后重启服务。
+                </p>
+              </div>
+
+              <!-- 布尔 / 数字 / 文本三选一 -->
+              <div v-if="!f.lockedByEnv">
+                <button
+                  v-if="f.type === 'boolean'"
+                  :id="`cfg-${f.key}`"
+                  type="button"
+                  role="switch"
+                  :aria-checked="Boolean(fieldValue(f))"
+                  class="flex w-full items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm transition-colors hover:bg-accent/50"
+                  :disabled="configBusy"
+                  @click="setField(f, !fieldValue(f))"
+                >
+                  <span class="flex items-center gap-2">
+                    <span
+                      class="size-2 rounded-full"
+                      :class="fieldValue(f) ? 'bg-emerald-500' : 'bg-muted-foreground/40'"
+                      aria-hidden="true"
+                    />
+                    {{ fieldValue(f) ? '已开启' : '已关闭' }}
+                  </span>
+                  <span
+                    class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors"
+                    :class="fieldValue(f) ? 'bg-primary' : 'bg-muted'"
+                  >
+                    <span
+                      class="inline-block size-4 rounded-full bg-background shadow transition-transform"
+                      :class="fieldValue(f) ? 'translate-x-4' : 'translate-x-0.5'"
+                    />
+                  </span>
+                </button>
+
+                <Input
+                  v-else-if="f.type === 'number'"
+                  :id="`cfg-${f.key}`"
+                  type="number"
+                  :model-value="String(fieldValue(f))"
+                  :min="f.min"
+                  :max="f.max"
+                  :disabled="configBusy"
+                  @update:model-value="(v: any) => setField(f, v === '' ? 0 : Number(v))"
+                />
+
+                <Input
+                  v-else
+                  :id="`cfg-${f.key}`"
+                  :model-value="String(fieldValue(f))"
+                  :disabled="configBusy"
+                  :placeholder="f.type === 'url' ? 'https://example.com' : ''"
+                  @update:model-value="(v: any) => setField(f, v)"
+                />
+
+                <p v-if="fieldErrors[f.key]" class="mt-1.5 flex items-start gap-1.5 text-xs text-destructive">
+                  <AlertTriangle class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                  {{ fieldErrors[f.key] }}
+                </p>
+                <p v-else class="mt-1.5 text-xs leading-5 text-muted-foreground">{{ f.hint }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="mt-6 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
+          出于安全考虑，
+          <code class="rounded bg-muted px-1 py-0.5">admin.password</code> /
+          <code class="rounded bg-muted px-1 py-0.5">admin.username</code> 与
+          <code class="rounded bg-muted px-1 py-0.5">github.token</code>
+          不在此处编辑：token 请用上方专用入口；密码请直接改服务器上的配置文件后重启，
+          避免后台会话被窃取即等同于拿到密码。
+        </p>
+      </Card>
+
+      <Card v-else class="p-6">
+        <h2 class="flex items-center gap-2 text-base font-semibold">
+          <SlidersHorizontal class="size-4 text-muted-foreground" aria-hidden="true" />
+          配置编辑已禁用
+        </h2>
+        <p class="mt-2 text-xs leading-5 text-muted-foreground">
+          配置中 <code class="rounded bg-muted px-1 py-0.5">admin.allowConfigEdit = false</code>，
+          面板不提供可视化编辑。如需启用，请改服务器上的配置文件并重启服务。
+        </p>
+      </Card>
+
+      <div v-if="status" class="space-y-1">
+        <p class="text-center text-xs text-muted-foreground">
+          数据抓取于 {{ formatDate(status.now) }} · 版本号与下载链接由站点运行时自动聚合，无需人工维护
+        </p>
+        <p v-if="status.lastConfigReloadAt" class="text-center text-xs text-muted-foreground">
+          配置最近一次热重载：{{ formatDate(status.lastConfigReloadAt) }}
+        </p>
+      </div>
     </div>
   </div>
 </template>

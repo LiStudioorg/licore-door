@@ -323,6 +323,36 @@ nano /opt/licore-website/licore-site.toml
 pm2 reload licore-website --update-env
 ```
 
+> 🔒 密码**刻意不支持在面板上改** —— 面板本身已登录，能改密码就等于
+> 「会话被窃取 = 直接丢密码」，而且改完已有会话仍然有效。
+> 请按上面的方式改配置文件。
+
+### 3.9 在面板上改站点配置（无需重启）
+
+登录 `/admin` 后，「配置编辑」卡片可以直接改 `[site]` 与 `[display]` 段的字段
+（站点地址、站点名称、备案号、更新日志条目上限、首页活动流开关）。
+
+**保存后立即生效**：服务会写回 `licore-site.toml` 并**热重载**，
+不需要 `pm2 reload`，也不需要重新部署。
+
+```bash
+# 面板保存时会在同目录留一份备份，可随时手工回滚：
+ls -l /opt/licore-website/licore-site.toml*
+# licore-site.toml        ← 当前生效
+# licore-site.toml.bak    ← 最近一次面板保存前的版本
+
+cp /opt/licore-website/licore-site.toml.bak /opt/licore-website/licore-site.toml
+pm2 reload licore-website --update-env
+```
+
+写入是**保留注释**的（只替换目标行的值），所以文件里那些说明文字不会丢。
+想要只读面板，把 `[admin]` 段设成 `allowConfigEdit = false` 即可。
+
+> ✅ **面板里改的值不会被后续部署覆盖**：`deploy-pm2.sh` 发现
+> `licore-site.toml` 已存在时会**原样保留**，只在首次部署时生成一份。
+> 只有你自己手工覆盖文件才会丢。另外改 `site.url` 时记得 `nginx` 的
+> `server_name` 与 `NUXT_PUBLIC_SITE_URL`（若设了，优先级更高）也要同步。
+
 ---
 
 ## 4. 方式 B：systemd 手动部署
@@ -522,6 +552,10 @@ nano /opt/licore-website/ecosystem.config.cjs
 # 重载（不需要重新部署）
 pm2 reload licore-website --update-env
 ```
+
+> 💡 如果只是改 `[site]` / `[display]` 段（站点地址、名称、备案号、展示开关），
+> 更省事的做法是直接在 `/admin` 面板的「配置编辑」里改 —— 保存即生效，
+> **不用重载**（见 §3.9）。手改文件仍需要重载才能生效。
 
 **看当前跑的是哪个版本**：
 ```bash

@@ -56,6 +56,15 @@ sessionHours = 12
 # false = 面板只读，不显示清理按钮
 allowCacheClear = true
 
+# 是否允许在后台面板上**可视化修改配置**。
+# true  = 面板上可编辑 [site] 与 [display] 段的字段，保存后写回本文件并立即生效
+#         （写入前会备份为 licore-site.toml.bak）
+# false = 面板只展示配置，不提供编辑
+#
+# 注意：[admin] 段的密码/用户名与 [github].token 不在面板编辑范围内 ——
+# token 有专门入口，密码刻意不提供在线修改（避免会话被窃取即等于丢密码）。
+allowConfigEdit = true
+
 
 # ----------------------------------------------------------------------------
 # GitHub 上游数据

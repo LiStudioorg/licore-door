@@ -259,10 +259,12 @@ npm run build
 #    CI 里用的是 3001（runner 是干净环境，肯定空闲）
 PORT=3111 HOST=127.0.0.1 node .output/server/index.mjs &
 sleep 6
-for p in / /changelog /download /docs /about; do
+for p in / /changelog /download /docs /about /admin /sitemap.xml /robots.txt; do
   printf "%-11s " "$p"
   curl -s -o /dev/null -w "HTTP %{http_code}\n" "http://127.0.0.1:3111$p"
 done
+# 未登录访问后台接口必须是 401（不是 200，也不是 500）
+curl -s -o /dev/null -w "admin 未登录 %{http_code}（应 401）\n" http://127.0.0.1:3111/api/admin/status
 # 全部应为 200
 ```
 
@@ -300,6 +302,47 @@ curl -s -b /tmp/ck.txt -o /dev/null -w "已登录 status: %{http_code}（应 200
 curl -s -o /dev/null -w "/admin: %{http_code}（应 200）\n" "$B/admin"
 rm -f /tmp/ck.txt
 ```
+
+> ⚠️ cookie jar 一律用 `mktemp` 生成**新文件名**，别写死 `/tmp/ck.txt`：
+> 那个路径上可能有别人的旧 jar，写不进去（`rm` 还会报 `Operation not permitted`），
+> 于是你会复用旧会话，出现「登录返回 200、下一个请求却 401」的假故障。
+
+**如果改动了「配置可视化编辑」相关代码**（`server/utils/editable-config.ts`、
+`server/utils/config.ts`、`server/api/admin/config.set.post.ts`、`app/pages/admin.vue`），
+额外验证这一串 —— **注意先备份 TOML，测完恢复**：
+
+```bash
+B=http://127.0.0.1:3111
+cp licore-site.toml /tmp/site.toml.bak
+JAR=$(mktemp /tmp/ck.XXXXXX)
+curl -s -c "$JAR" -o /dev/null -X POST "$B/api/admin/login" \
+  -H 'content-type: application/json' -d '{"username":"admin","password":"admin"}'
+
+# 1) 写一个字段 → 必须立即生效（无需重启）
+curl -s -b "$JAR" -X POST "$B/api/admin/config.set" -H 'content-type: application/json' \
+  -d '{"patch":{"display.showActivity":false}}' | head -c 200
+curl -s "$B/api/site-config"        # showActivity 应为 false
+
+# 2) 首页应真的不渲染活动流了
+curl -s "$B/" | grep -c "开发动态"   # 应为 0
+
+# 3) 注释必须保留（关键回归点）
+grep -c '^#' licore-site.toml        # 应远大于 0，且 # 站点规范地址 仍在
+
+# 4) 非法值 / 未登记字段必须被拒（400），不能写进文件
+curl -s -b "$JAR" -X POST "$B/api/admin/config.set" -H 'content-type: application/json' \
+  -d '{"patch":{"site.url":"not-a-url"}}' | grep -o '必须是 http[^"]*'
+curl -s -b "$JAR" -X POST "$B/api/admin/config.set" -H 'content-type: application/json' \
+  -d '{"patch":{"admin.password":"x"}}' | grep -o '不允许在面板上修改'
+grep -E '^password' licore-site.toml # 必须还是原值
+
+# 5) 恢复并确认文件与此前完全一致
+cp /tmp/site.toml.bak licore-site.toml
+rm -f "$JAR" licore-site.toml.bak
+```
+
+> 第 3、5 条是最容易回归的点：**改写 TOML 必须保留注释、且可重复执行不漂移**。
+> 换用 `stringify()` 整份重写就会把注释抹光，CI 不检查这个，只有这里能拦住。
 
 **注意**：改动 SEO 相关字段（3.4 节）时，额外确认输出：
 
@@ -364,6 +407,7 @@ git push origin main
 | **端口 3000/3001 都被占用** | 这台机器上 3000 与 3001 都有别的服务在监听。测试前先 `ss -ltn \| grep :3111` 确认空闲，用 3111 之类的高位端口。 |
 | **`pkill -f nuxt` 会杀掉自己** | 该模式会匹配到执行它的 shell 本身。**一律按端口反查 PID 来清理**：`pid=$(ss -ltnp \| grep ':3111 ' \| grep -oE 'pid=[0-9]+' \| head -1 \| cut -d= -f2); [ -n "$pid" ] && kill "$pid"`。不要用 `kill %1` —— 在脚本里 `%1` 可能指向别的任务（见第 6 节「重新构建后必须先重启测试服务」）。 |
 | **重新构建后必须先重启测试服务，否则验证会假失败** | `npm run build` 只更新 `.output/`，**不会**影响已经在跑的 `node .output/server/index.mjs` —— 旧进程仍在内存里跑着旧代码，继续对旧端口回旧 HTML。此时冒烟测试会"证明"你的修改没生效（实测踩过两次：改了文案却仍抓到旧字符串、改了校验却仍报旧错误），很容易误判成代码没改对。**正确顺序**：改代码 → `npm run build` → **先按端口杀掉旧进程**（方法见上一行）→ 再启动新的 → 然后验证。想确认跑的是不是新进程，可看启动时间：`ps -o lstart= -p $pid`。 |
+| **杀进程杀错了对象，会以为验证通过了（而实际测的是旧代码）** | 三个连环坑：① `ss -ltnp` 在普通用户下**经常读不到 PID**（`grep -oE 'pid=[0-9]+'` 结果为空），上一行的反查方法会静默失败；② `kill $!` 杀的是 `bash -c` 包装 shell，**不是**真正的 node 子进程，node 仍活着占着端口；③ 新进程启动失败会打 `EADDRINUSE` 到日志里，但如果你没看日志，端口仍在响应，就会**用旧代码跑完整个冒烟测试并得出错误结论**。稳妥做法：先用 `ps -eo pid,lstart,cmd \| grep output/server/index.mjs` 找到**真正的 node 进程**（看启动时间对不对），kill 之后**必须确认端口真的释放**再启动新的：<br>`for i in 1 2 3 4 5; do sleep 1; (exec 3<>/dev/tcp/127.0.0.1/3111) 2>/dev/null \|\| { echo 已释放; break; }; done`<br>启动后**先看日志有没有 `Listening on`**，再跑断言。 |
 | **GitHub 配额** | 匿名 60 次/小时，很容易耗尽。配额为 0 时页面仍返回 200（降级渲染），但 `/api/status` 会报 503。改文案不需要访问 GitHub，不受影响。 |
 | **`.licore` 不是 OCI，但 Docker 镜像可以转换** | 两件事要分清：① **格式/运行时层面互不兼容** —— `.licore` 是自研格式，不能由 Docker 构建或运行，LiCore 运行时也不能直接跑 OCI 镜像，`licore pull` 的 Hub 与 Docker Registry 无关。所以**不要**写"兼容 OCI""Docker 替代品（可直接跑 Docker 镜像）"这类表述。② **但存在一条转换路径** —— `licore convert <docker 镜像>` 会调用本机 `docker export`/`inspect` 把现成 Docker 镜像转成 `.licore`（单向，需本机有 docker CLI）。这是**转换**，不是**兼容**。 |
 | **上游 FAQ 与 convert 冲突** | 上游 `README` 的 FAQ#2 仍写着"不做镜像格式转换"，但同一份 README 的《从 Docker 镜像转换（convert）》章节正是做这件事（`docs/convert.md` 有完整参数表）。**以 convert 章节与 `docs/convert.md` 为准**，FAQ#2 是上游文档没同步。官网文案只描述 convert 的**用途与用法**，不要借它宣称兼容 Docker/OCI 生态。 |
@@ -421,8 +465,9 @@ git push origin main
 | `app/app.vue` | 全局 head、canonical、JSON-LD 兜底 | ❌ 不要动 |
 | `public/og.svg` / `public/og.png` | 分享图源文件与产物 | ❌ 与上游内容无关 |
 | `public/BingSiteAuth.xml` | Bing 站点验证 | ❌ 不要动 |
-| `licore-site.toml` | 站点配置文件（TOML） | ❌ 与上游内容无关 |
-| `server/utils/config.ts` | TOML 配置加载与校验 | ❌ 不要动 |
+| `licore-site.toml` | 站点配置文件（TOML） | ❌ 与上游内容无关（面板可可视化编辑 `[site]` / `[display]`） |
+| `server/utils/config.ts` | TOML 配置加载与校验 + 热重载 | ❌ 不要动 |
+| `server/utils/editable-config.ts` | 面板可编辑字段白名单 | ❌ 不要动 |
 | `server/utils/auth.ts` | 后台认证（会话 cookie） | ❌ 不要动 |
 | `server/api/admin/` | 后台接口 | ❌ 不要动 |
 | `server/utils/changelog.ts` | 版本与下载聚合 | ❌ 不要动 |
@@ -486,9 +531,12 @@ pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
 
 PORT=3111 HOST=127.0.0.1 node .output/server/index.mjs &
 sleep 6
-for p in / /changelog /download /docs /about; do
+for p in / /changelog /download /docs /about /admin /sitemap.xml /robots.txt; do
   curl -s -o /dev/null -w "$p → %{http_code}\n" "http://127.0.0.1:3111$p"
 done
+# 未登录访问后台接口必须是 401
+curl -s -o /dev/null -w "admin 未登录 → %{http_code}（应 401）\n" \
+  http://127.0.0.1:3111/api/admin/status
 
 # 清理：仍按端口反查 PID，不要用 kill %1（脚本里 %1 可能指向别的任务）
 pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
@@ -505,9 +553,10 @@ pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
 | 文件 | 作用 |
 | --- | --- |
 | `licore-site.toml` | 站点配置：站点地址、后台账号、GitHub token、缓存 TTL、显示开关 |
-| `server/utils/config.ts` | 加载并校验 TOML；任何错误都回退默认值，**绝不让站点挂掉** |
+| `server/utils/config.ts` | 加载并校验 TOML；任何错误都回退默认值，**绝不让站点挂掉**；支持热重载 |
+| `server/utils/editable-config.ts` | 面板「配置编辑」的字段白名单与校验 |
 | `server/utils/auth.ts` | HMAC 签名会话 cookie；未登录一律 401 |
-| `server/api/admin/*` | 登录 / 登出 / 状态 / 清缓存 |
+| `server/api/admin/*` | 登录 / 登出 / 状态 / Token / 配置写入 / 清缓存 |
 
 **做内容同步时你不需要碰这些**。只有一条要注意：
 
@@ -515,6 +564,30 @@ pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
   记得 `licore-site.toml` 里的 `site.url` 与 `app/config/site.ts` 的 `site.url`
   是**两个地方**（前者优先级更高，因为它在运行时覆盖后者）。
   换域名时**两边都要改**，否则 sitemap 与 canonical 会不一致。
+
+### 关于「配置可视化编辑」（2026-10 新增）
+
+后台面板现在可以直接编辑 `[site]` 与 `[display]` 段的字段，
+**保存后写回 `licore-site.toml` 并热重载，无需重启服务**；写入保留注释，
+并自动备份为 `.bak`。三层结构：
+
+```
+server/utils/editable-config.ts   字段白名单 + 校验（服务端决定能改什么）
+server/utils/config.ts            保留注释的 TOML 改写 + reloadConfig()
+app/pages/admin.vue               只负责渲染服务端下发的字段清单
+```
+
+对你的影响：
+
+- **仍然不要在 `licore-site.toml` 里手写版本号或下载链接**（第 5 节硬性约束不变）。
+- 面板改的是**展示类与站点信息**字段，**与上游内容同步无关**，你不需要用它。
+- 若你按第 3.4 节改了文案，注意 `licore-site.toml` 的 `[site].name` / `icp`
+  可能已被运维在面板上改过 —— **不要顺手覆盖**，只在确有矛盾时改，
+  并在报告里说明。
+- `app/pages/index.vue` 的「最近提交」活动流与 `changelogMaxItems`
+  现在受面板开关控制（`display.showActivity` / `display.changelogMaxItems`）。
+  如果冒烟测试发现首页没有活动流，**先确认是不是运维在面板上关掉了**，
+  不要当成 bug 去改代码。
 
 配置文件是**容错**的：字段类型写错只会让该字段回退默认值，其余字段照常生效，
 并打印告警（后台面板顶部也会汇总显示）。所以你不必担心手滑改坏站点，

@@ -48,6 +48,9 @@ const { data: logData } = await useAsyncData<ChangelogApi | null>(
   { server: true },
 )
 
+/** 生效的展示开关（后台面板可改）：changelogMaxItems 控制每个版本默认展开的条数 */
+const siteRuntime = useDisplayConfig()
+
 const log = logData.value ?? FALLBACK_LOG
 
 const versions = log.versions
@@ -290,6 +293,7 @@ useHead({
               :key="v.version"
               :entry="v"
               :latest="i === 0 && v.version === latestVersion?.version"
+              :max-items="siteRuntime.display.changelogMaxItems"
               class="scroll-mt-24"
             />
           </div>

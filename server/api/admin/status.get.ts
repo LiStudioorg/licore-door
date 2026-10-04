@@ -5,9 +5,17 @@
  * 需要登录。这里比公开的 /api/status 多返回「生效配置」与配置告警，
  * 便于运维在面板上直接确认 TOML 有没有被正确读到。
  */
-import { cacheStats, getRepoMeta } from '../../utils/github'
+import { cacheStats, getRepoMeta, releaseTtlSeconds } from '../../utils/github'
 import { isAuthenticated } from '../../utils/auth'
-import { configPath, configWarnings, siteConfig, effectiveGitHubToken, tokenSourceLabel } from '../../utils/config'
+import {
+  configPath,
+  configWarnings,
+  siteConfig,
+  effectiveGitHubToken,
+  tokenSourceLabel,
+  configLastReloadAt,
+} from '../../utils/config'
+import { editableSections } from '../../utils/editable-config'
 
 export default defineEventHandler(async (event) => {
   if (!siteConfig.admin.enabled) {
@@ -62,6 +70,7 @@ export default defineEventHandler(async (event) => {
         username: siteConfig.admin.username,
         sessionHours: siteConfig.admin.sessionHours,
         allowCacheClear: siteConfig.admin.allowCacheClear,
+        allowConfigEdit: siteConfig.admin.allowConfigEdit,
         usingDefaultPassword: siteConfig.admin.password === 'admin',
       },
       github: {
@@ -70,12 +79,18 @@ export default defineEventHandler(async (event) => {
         releasesTtlSeconds: siteConfig.github.releases,
         repoTtlSeconds: siteConfig.github.repo,
         contributorsTtlSeconds: siteConfig.github.contributors,
+        // 实际生效的发行缓存（可能被 GITHUB_CACHE_TTL_SECONDS 统一覆盖）
+        effectiveReleaseTtlSeconds: releaseTtlSeconds(),
       },
       display: {
         changelogMaxItems: siteConfig.display.changelogMaxItems,
         showActivity: siteConfig.display.showActivity,
       },
     },
+    /** 可视化编辑：字段清单与当前值由服务端下发，前端只负责渲染 */
+    editable: editableSections(),
+    /** 最近一次配置热重载时间（保存配置后不为空） */
+    lastConfigReloadAt: configLastReloadAt() || null,
     now: new Date().toISOString(),
   }
 })

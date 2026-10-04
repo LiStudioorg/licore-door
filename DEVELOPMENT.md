@@ -110,6 +110,7 @@ app/                          # 前端（会被打进客户端 bundle）
 ├── composables/
 │   ├── useFormat.ts          # 字节/日期/相对时间/数字格式化
 │   ├── useTheme.ts           # 明暗主题（localStorage + prefers-color-scheme）
+│   ├── useDisplayConfig.ts   # ★ 生效的展示开关（面板可改，服务端下发）
 │   └── usePageSeo.ts         # ★ 页面 SEO 统一入口（补全分享图字段）
 ├── config/site.ts            # ★ 站点文案常量（不依赖服务端）
 └── pages/
@@ -118,11 +119,12 @@ app/                          # 前端（会被打进客户端 bundle）
     ├── download.vue          # 下载
     ├── docs.vue              # 文档（纯静态内容）
     ├── about.vue             # 关于
-    └── admin.vue             # 后台面板（noindex，不在导航里）
+    └── admin.vue             # 后台面板（noindex，不在导航里；含配置编辑）
 
 server/                       # 服务端（绝不进客户端 bundle）
 ├── api/
 │   ├── status.get.ts         # 健康检查 + 缓存状态
+│   ├── site-config.get.ts    # 下发展示开关（无敏感字段）
 │   ├── repo.get.ts           # 仓库元信息
 │   ├── changelog.get.ts      # 更新日志
 │   ├── commits.get.ts        # 提交列表
@@ -133,11 +135,13 @@ server/                       # 服务端（绝不进客户端 bundle）
 │       ├── logout.post.ts
 │       ├── status.get.ts
 │       ├── token.set.post.ts # 运行时配置 GitHub Token
+│       ├── config.set.post.ts# 配置写入 + 热重载
 │       └── cache/clear.post.ts
 └── utils/
     ├── github.ts             # ★ 上游访问层：缓存/TTL/去重/超时
     ├── changelog.ts          # ★ 业务聚合：版本、下载项、变更日志
-    ├── config.ts             # TOML 配置加载 + 运行时 token
+    ├── config.ts             # TOML 配置加载 + 运行时 token + 热重载 + 写盘
+    ├── editable-config.ts    # ★ 可编辑字段白名单与校验（面板配置编辑用）
     ├── auth.ts               # HMAC 无状态会话
     └── upstream.ts           # 上游失败统一降级为 503
 
@@ -280,6 +284,7 @@ try {
 | 路由 | 说明 | 降级 |
 | --- | --- | --- |
 | `GET /api/status` | 健康检查 + 缓存状态 | 200，`reachable: false` |
+| `GET /api/site-config` | 展示开关（`display.*` 与站点名称/地址） | 200，内置默认值 |
 | `GET /api/repo` | 仓库元信息 | 503 |
 | `GET /api/changelog` | 更新日志 | 503 |
 | `GET /api/commits?limit=N` | 提交列表 | 503 |
@@ -294,6 +299,7 @@ try {
 | `POST /api/admin/logout` | 登出（幂等，未登录也返回 200） |
 | `GET  /api/admin/status` | 面板数据：上游可达性 + 缓存明细 + 生效配置 |
 | `POST /api/admin/token.set` | 设置/清除运行时 GitHub Token |
+| `POST /api/admin/config.set` | 可视化编辑配置：写回 TOML + 热重载（需 `allowConfigEdit`） |
 | `POST /api/admin/cache/clear` | 清缓存，body `{ key? }`，省略则全清 |
 
 `admin.enabled = false` 时，后台接口一律返回 404（连登录接口都不存在）。
@@ -508,21 +514,148 @@ usePageSeo(
 
 `licore-runtime-token` 已在 `.gitignore` 里。
 
+### 配置可视化编辑
+
+面板的「配置编辑」卡片可以改 `[site]` 与 `[display]` 段的字段：
+
+```
+面板渲染（字段清单来自 /api/admin/status 的 editable）
+  → 用户改动 → 只把差异 POST /api/admin/config.set
+  → 白名单校验 + 类型校验 + 环境变量覆盖检查
+  → applyTomlUpdates() 精确改写 licore-site.toml（保留注释）
+  → parseToml() 自检通过才落盘（并备份 .bak）
+  → reloadConfig() 原地刷新 siteConfig → 立即生效，无需重启
+```
+
+机制细节见 [§9.1~§9.4](#91-运行时可变配置面板可视化编辑的基础)；
+写盘与白名单分别在 `server/utils/config.ts` 与 `server/utils/editable-config.ts`。
+
+**加一个可编辑字段**：只需在 `editable-config.ts` 的 `FIELD_RULES` 里加一条
+（含 `read` / `write` / 校验 / 类型），面板会自动渲染出来，前端不用改。
+
+关闭该功能：`[admin] allowConfigEdit = false`，
+此时 `/api/admin/config.set` 返回 403，面板显示为只读说明。
+
 ---
 
 ## 9. 配置系统
 
 ### `server/utils/config.ts`
 
-- **只读一次**：模块首次导入时同步读取解析，缓存在模块作用域。
-  改配置后重启生效（运行时 token 除外，它每次读文件）。
 - **容错优先**：文件不存在、语法错误、字段类型不对，一律退回默认值
   并打印告警 —— 官网因为一个手滑的 TOML 就 500 是不可接受的。
 - **环境变量优先**：便于容器化部署与 CI 覆盖。
+- **运行时可热重载**：见下。
 
 查找顺序：`LICORE_SITE_CONFIG` → `process.cwd()` → 项目根目录。
 
+### 9.1 运行时可变配置（面板可视化编辑的基础）
+
+历史实现是「模块导入时读一次、之后永不变化」，改配置必须重启进程。
+后台面板加入可视化编辑后这个前提不再成立，现在是：
+
+```
+siteConfig        普通可变对象（不是 const 冻结值）
+    ↑ 原地改写
+reloadConfig()    重新解析 TOML → 用 fresh 值逐个赋值给 siteConfig
+```
+
+**两个关键设计**：
+
+1. **原地改写（in-place mutation），不重新赋值**
+   `siteConfig` 是 `export const`，对象引用被 auth / github / api 路由各自持有。
+   如果改成 `siteConfig = build()` 重新赋值，那些模块拿到的还是旧对象 ——
+   表现为「新配置只对新 import 的代码生效」，极难排查。
+   所以 `reloadConfig()` 逐个字段赋值，保证**所有持有引用的地方同时看到新值**。
+
+2. **TTL 必须是 getter，不能是常量**
+   `server/utils/github.ts` 里原来写的是 `releases: seconds(...)`，
+   模块导入时求值一次。缓存时长既然可在面板改，就必须延迟到**每次读取时**求值：
+
+   ```ts
+   export const TTL = {
+     get releases() { return seconds(siteConfig.github.releases) },
+     // ...
+   } as const
+   ```
+
+   同理 `RELEASE_TTL_SECONDS` 改成了函数 `releaseTtlSeconds()`，
+   否则各 API 的 `s-maxage` 响应头会一直用进程启动时的旧值。
+
+   支持面板改 TTL 时，**这两处漏一处就会出现「面板显示改了、实际没生效」**。
+
+### 9.2 写回 TOML：保留注释的精确改写
+
+配置文件是给人看的，里面的注释本身就是文档（README 明确让人读注释改配置）。
+所以**不能用 `stringify()` 整份重写**（那会抹掉所有注释、字段顺序与空行），
+而是 `applyTomlUpdates()` 逐字段精确改写：
+
+| 情况 | 行为 |
+| --- | --- |
+| 字段已存在 | 只替换该行的值，**保留行尾注释**与缩进 |
+| 段落存在、字段缺失（或被整行注释掉） | 插到段落末尾 |
+| 整段缺失 | 文件末尾追加该段落 |
+
+写盘前有**一道关键自检**：把改写后的文本 `parseToml()` 重新解析一遍，
+解析不过就**放弃写入并报错**。宁可这次保存失败，也不能把配置文件写成
+语法错误的版本 —— 那会让下次启动直接退回全部默认值。
+
+写前还会 `copyFileSync` 备份为 `licore-site.toml.bak`，便于手工回滚。
+
+### 9.3 可编辑字段白名单（`server/utils/editable-config.ts`）
+
+面板能改什么，**由服务端的一张 `FIELD_RULES` 表决定**，
+`/api/admin/status` 把这张表（含当前值、类型、说明、取值范围）下发给前端，
+前端只负责渲染。这样加字段只改一处，不会前后端各写一份列表。
+
+安全设计：
+
+- **白名单制**：不在表里的字段一律拒绝，面板不能当任意写入的入口。
+- **敏感字段刻意排除**：`admin.password` / `admin.username` / `github.token`。
+  面板已登录，能改密码就等于「会话被窃取 = 直接丢密码」，且改完已有会话仍有效。
+- **环境变量锁定**：字段被 `NUXT_PUBLIC_SITE_URL` 等覆盖时，
+  面板显示为**只读并说明原因**，提交也直接拒绝 —— 避免"改了没效果"的困惑。
+- **只提交差异**：前端只发用户真正改过的字段，没碰的字段不会被重写。
+
+### 9.4 展示开关如何到达页面
+
+页面拿不到服务端配置（不能 import `server/utils` 的函数，见 §13.3），
+但又必须让面板改的开关生效。链路是：
+
+```
+面板保存 → reloadConfig() → /api/site-config（只读、无敏感字段）
+         → useDisplayConfig()（useAsyncData，进 SSR payload）→ 页面模板
+```
+
+> ⚠️ **命名陷阱：不要把它叫 `useSiteConfig`**。`@nuxtjs/sitemap` 会带入
+> `nuxt-site-config` 模块，它自动导入了一个**同名**的 `useSiteConfig`。
+> 同名时自动导入会解析到模块那个，你的函数根本不会执行，
+> 调用方拿到的对象上属性是 `undefined`，模板一读就抛
+> `Cannot read properties of undefined`。详见 §13.9。
+
 ### ⚠️ 客户端安全守卫
+
+`config.ts` 里的所有 Node 专属调用（`node:fs`、`process.cwd()`）
+都包在 `IS_SERVER` 判断里：
+
+```ts
+const IS_SERVER = import.meta.server
+
+export function readRuntimeToken(): string {
+  if (!IS_SERVER) return ''
+  // ...
+}
+```
+
+**为什么**：这个模块历史上被页面静态引入过，于是也被打进了客户端 bundle。
+浏览器里 `node:fs` 被 Vite stub 成空对象、`process.cwd()` 根本不存在，
+一调用就在**模块求值阶段**抛 `TypeError`，整个 chunk 崩溃、水合全废。
+
+即使现在已经没有页面直接引入它了，**守卫也必须保留** ——
+这是防止同类事故的最后一道闸。
+
+> 注意：从 `editable-config.ts` 导出的 `siteConfig` 相关函数同样只在服务端调用；
+> 页面要用配置一律走 `/api/site-config` + `useDisplayConfig()`，**不要**直接 import。
 
 `config.ts` 里的所有 Node 专属调用（`node:fs`、`process.cwd()`）
 都包在 `IS_SERVER` 判断里：
@@ -910,6 +1043,62 @@ if (raw && !raw.startsWith('gh_')) throw createError({ statusCode: 400, … })
 > 如果复用了别的项目的 jar（例如里面已有 `lipanel_token`），
 > 登录写不进去，后续请求会全部 401，看着像鉴权坏了，其实是测试脚本的问题。
 > 每次都 `rm -f` 一个新 jar 再登录。
+>
+> 实测还遇到一种更隐蔽的情况：`/tmp` 下残留了**别的用户创建的** jar 文件
+> （`rm` 报 `Operation not permitted`），脚本继续往里写就会拿到旧的会话，
+> 表现为「登录返回 200，紧接着的请求却 401」。用 `mktemp` 生成新文件名即可避开。
+
+### 13.9 `useSiteConfig` 名字被 nuxt-site-config 占用
+
+做配置可视化编辑时，新加的 composable 曾命名为 `useSiteConfig`。结果：
+
+**症状**：`/` 与 `/changelog` 直接 500，报
+`Cannot read properties of undefined (reading 'showActivity')`；
+而 `/download` `/docs` `/about` 完全正常。
+
+**原因**：`@nuxtjs/sitemap` 会带入 `nuxt-site-config` 模块，后者**自动导入了
+一个同名的 `useSiteConfig`**（返回它自己的 siteConfig，一个 reactive 对象）。
+Nuxt 自动导入遇到重名时会解析到模块那个，自己的 composable 根本不执行 ——
+于是调用方拿到一个普通对象，`display` 属性是 `undefined`，模板一读就炸。
+
+**怎么发现**：查 `.nuxt/imports.d.ts`：
+
+```bash
+grep -n "useSiteConfig" .nuxt/imports.d.ts
+# 36: ... from '../app/composables/useSiteConfig'          ← 自己的
+# 44: ... from '../node_modules/nuxt-site-config/...'     ← 模块的（这个生效）
+```
+
+**规则**：新加 composable 前先 `grep` 一下 `.nuxt/imports.d.ts` 或依赖，
+**不要用 `useSiteConfig` / `useSeoMeta` 这类通用名**。现在叫 `useDisplayConfig`。
+
+### 13.10 在同一次 setup 里读另一个 useAsyncData 的值会拿到 undefined
+
+写作时的直觉是「先 `const cfg = useSiteConfig()`，再在后面的
+`useAsyncData` loader 里读 `cfg.value.display.xxx`」。**这是错的**：
+
+```ts
+// ❌ 崩：loader 执行时 cfg.value 还是 undefined
+const cfg = useDisplayConfig()
+const { data } = await useAsyncData('home', async () => {
+  if (cfg.value.display.showActivity) { … }
+})
+
+// ✅ 正确：loader 内部自己去取（key 相同，Nuxt 会去重）
+const { data } = await useAsyncData('home', async () => {
+  const cfg = await fetchDisplayConfig()
+  if (cfg.display.showActivity) { … }
+})
+```
+
+`useAsyncData` 的 `default` 只在**解析完成后**兜底，不覆盖"还没开始取"的瞬间；
+同一个 setup 里另一个 `useAsyncData` 的 loader 执行时机并不保证在其后。
+
+**规则**：跨 `useAsyncData` 传递数据，一律在 loader 内部**重新取一次**
+（或直接 await 前者返回的 promise），不要依赖 setup 中的执行顺序。
+
+> 模板里用 `useDisplayConfig()` 返回的 computed 是安全的（渲染发生在解析之后），
+> 只有「在另一个异步 loader 里读」才有这个坑。
 
 ---
 
@@ -960,6 +1149,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/admin/status
 - [ ] 页面 JSON-LD 能 `JSON.parse` 通过，且用 `@id` 引用 `#organization`（§10.4）
 - [ ] 改了 `og.svg` 的话，`og.png` 已重新生成（§10.3）
 - [ ] 从外部拿到的验证文件已 `chmod 644`（§10.5）
+- [ ] 新增 composable 没有和自动导入的模块**重名**（见 [§13.9](#139-usesiteconfig-名字被-nuxt-site-config-占用)）
+- [ ] 没有在同一个 setup 的另一个 `useAsyncData` loader 里读 `xxx.value`（[§13.10](#1310-在同一次-setup-里读另一个-useasyncdata-的值会拿到-undefined)）
+- [ ] 改配置相关代码后，**重新构建并重启测试进程**再验证（否则测的是旧代码，见 MAINTENANCE §6）
 
 ---
 

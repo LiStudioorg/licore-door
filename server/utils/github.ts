@@ -282,11 +282,14 @@ function mapTag(raw: any): GitHubTag {
 /**
  * 各资源的缓存时长（毫秒）。
  *
- * 发行相关数据固定 5 分钟刷新一次：上游一发布新版本、或补上 Release 资产，
+ * 发行相关数据默认 5 分钟刷新一次：上游一发布新版本、或补上 Release 资产，
  * 官网最多 5 分钟后就会自动反映出来，无需重新部署。
  *
  * 优先级：环境变量 GITHUB_CACHE_TTL_SECONDS（统一覆盖，本地调试设为 5 即可秒级刷新）
  *        > licore-site.toml 的 [github] 段 > 内置默认值。
+ *
+ * ⚠️ 这里必须是 **getter 而非普通常量**：后台面板可以改 `[github]` 段的缓存时长，
+ * 改完要立即生效。写成模块级常量只会在导入时求值一次，面板改完不重启就不起作用。
  */
 const TTL_OVERRIDE = Number(process.env.GITHUB_CACHE_TTL_SECONDS) || 0
 /** TOML 里按秒配置；同样受 GITHUB_CACHE_TTL_SECONDS 统一覆盖 */
@@ -294,19 +297,26 @@ const seconds = (n: number) => (TTL_OVERRIDE > 0 ? TTL_OVERRIDE * 1000 : n * 100
 
 export const TTL = {
   /** 仓库元信息：变化慢，10 分钟 */
-  repo: seconds(siteConfig.github.repo),
+  get repo() { return seconds(siteConfig.github.repo) },
   /** 发行版：5 分钟刷新（核心要求） */
-  releases: seconds(siteConfig.github.releases),
+  get releases() { return seconds(siteConfig.github.releases) },
   /** 版本 tag：跟随发行版设置 */
-  tags: seconds(siteConfig.github.releases),
+  get tags() { return seconds(siteConfig.github.releases) },
   /** 提交记录：跟随发行版设置 */
-  commits: seconds(siteConfig.github.releases),
+  get commits() { return seconds(siteConfig.github.releases) },
   /** 贡献者：变化最慢，30 分钟 */
-  contributors: seconds(siteConfig.github.contributors),
+  get contributors() { return seconds(siteConfig.github.contributors) },
 } as const
 
-/** 供页面展示"数据新鲜度"与 API 缓存头使用 */
-export const RELEASE_TTL_SECONDS = Math.round(TTL.releases / 1000)
+/**
+ * 供页面展示"数据新鲜度"与 API 缓存头使用。
+ *
+ * 同样必须是**函数**而非常量：面板改完 TTL 后，各 API 路由下次请求
+ * 就应该下发新的 `s-maxage`，而不是继续用进程启动时算出的旧值。
+ */
+export function releaseTtlSeconds(): number {
+  return Math.round(TTL.releases / 1000)
+}
 
 export function getRepoMeta(event?: H3Event): Promise<RepoMeta> {
   return cached('repo', TTL.repo, async () => {

@@ -20,7 +20,7 @@
  * 客户端一律拿不到配置文件，回退到内置默认值（站点文案用的是
  * `app/config/site.ts`，不受这里影响）。
  */
-import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync, copyFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parse as parseToml } from 'smol-toml'
 
@@ -43,6 +43,8 @@ export interface SiteConfig {
     password: string
     sessionHours: number
     allowCacheClear: boolean
+    /** 是否允许在后台面板上可视化修改配置（写入 licore-site.toml） */
+    allowConfigEdit: boolean
   }
   github: {
     token: string
@@ -69,6 +71,7 @@ const DEFAULTS: SiteConfig = {
     password: 'admin',
     sessionHours: 12,
     allowCacheClear: true,
+    allowConfigEdit: true,
   },
   github: {
     token: '',
@@ -86,7 +89,8 @@ const DEFAULTS: SiteConfig = {
  * 取值助手：类型不对就用默认值，并记录一条告警
  * ------------------------------------------------------------------ */
 
-const warnings: string[] = []
+/** 配置加载过程中产生的告警（每次 reload 重置后重新累积） */
+let warnings: string[] = []
 
 function warn(message: string) {
   warnings.push(message)
@@ -301,6 +305,11 @@ function build(): SiteConfig {
         DEFAULTS.admin.allowCacheClear,
         'admin.allowCacheClear',
       ),
+      allowConfigEdit: pickBool(
+        a.allowConfigEdit,
+        DEFAULTS.admin.allowConfigEdit,
+        'admin.allowConfigEdit',
+      ),
     },
     github: {
       // token：环境变量 > TOML；环境变量优先可以避免把密钥写进仓库
@@ -327,8 +336,60 @@ function build(): SiteConfig {
   return config
 }
 
-/** 站点配置（进程内只构建一次） */
+/* ------------------------------------------------------------------ *
+ * 运行时可变配置
+ *
+ * 历史设计是「模块导入时读一次，之后永不变化」—— 改配置必须重启进程。
+ * 后台面板加入「可视化编辑」后这个前提不再成立：改完要**立即生效**。
+ *
+ * 现在的做法：
+ *   - `siteConfig` 导出的是一个**普通可变对象**，所有消费方（auth / github /
+ *     api 路由）继续按属性读取，无需改动；
+ *   - `reloadConfig()` 重新解析 TOML 并**原地改写**该对象的字段
+ *     （in-place mutation 而非重新赋值，这样已 import 的模块持有的引用依然有效，
+ *      不会出现"新配置只对新 import 生效"的坑）；
+ *   - 写盘用 `writeConfigValues()`，按字段精确改写 TOML 文本以保留注释。
+ * ------------------------------------------------------------------ */
+
+/** 站点配置。**运行时可被 reloadConfig() 原地改写**，消费方直接读属性即可。 */
 export const siteConfig: SiteConfig = build()
+
+/** 最近一次成功 reload 的时间（ISO），供面板展示 */
+let lastReloadAt = ''
+
+export function configLastReloadAt(): string {
+  return lastReloadAt
+}
+
+/**
+ * 重新从磁盘加载配置，并**原地**更新 `siteConfig`。
+ *
+ * 注意：只有「配置文件里显式写了值」的字段才会被覆盖。
+ * 面板写入走的是 `writeConfigValues()` + `reloadConfig()`，写入的就是显式值，
+ * 因此不会出现"面板改了 A，结果 B 被默认值冲掉"的情况。
+ */
+export function reloadConfig(): SiteConfig {
+  warnings = []
+  const fresh = build()
+  // 原地改写：保留对象引用，避免已持有引用的模块读到旧值
+  siteConfig.site.url = fresh.site.url
+  siteConfig.site.name = fresh.site.name
+  siteConfig.site.icp = fresh.site.icp
+  siteConfig.admin.enabled = fresh.admin.enabled
+  siteConfig.admin.username = fresh.admin.username
+  siteConfig.admin.password = fresh.admin.password
+  siteConfig.admin.sessionHours = fresh.admin.sessionHours
+  siteConfig.admin.allowCacheClear = fresh.admin.allowCacheClear
+  siteConfig.admin.allowConfigEdit = fresh.admin.allowConfigEdit
+  siteConfig.github.token = fresh.github.token
+  siteConfig.github.releases = fresh.github.releases
+  siteConfig.github.repo = fresh.github.repo
+  siteConfig.github.contributors = fresh.github.contributors
+  siteConfig.display.changelogMaxItems = fresh.display.changelogMaxItems
+  siteConfig.display.showActivity = fresh.display.showActivity
+  lastReloadAt = new Date().toISOString()
+  return siteConfig
+}
 
 /** 配置加载过程中产生的告警，供后台面板展示 */
 export function configWarnings(): string[] {
@@ -338,4 +399,176 @@ export function configWarnings(): string[] {
 /** 当前生效的配置文件路径，未找到时为 null */
 export function configPath(): string | null {
   return resolveConfigPath()
+}
+
+/* ------------------------------------------------------------------ *
+ * 写入 TOML
+ *
+ * 为什么不用 `stringify()` 整份重写：那会把用户精心写的注释、字段顺序、
+ * 空行全部抹掉 —— 配置文件是给人看的，注释本身就是文档（README 明确
+ * 让人去读注释改配置）。所以这里做**逐字段精确改写**：
+ * 只动目标那一行的值，其余文本原样保留。
+ * ------------------------------------------------------------------ */
+
+/** 可被面板写入的字段，限定在 `[section] field` 白名单内 */
+export interface WritableField {
+  section: string
+  field: string
+  /** 写入 TOML 的字面量（字符串会自动加引号并转义） */
+  tomlLiteral: string
+}
+
+/** TOML 基本字符串转义：反斜杠、双引号与控制字符 */
+function tomlString(value: string): string {
+  const escaped = value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t')
+  return `"${escaped}"`
+}
+
+export function tomlStringLiteral(value: string): string {
+  return tomlString(value)
+}
+
+/**
+ * 在 TOML 文本中定位 `[section]` 段落，返回该段落的行范围（不含段头行）。
+ * 段落从 `[section]` 起，到下一个 `[` 开头的段头或文件结尾为止。
+ */
+function findSectionRange(lines: string[], section: string): { start: number; end: number } | null {
+  const header = `[${section}]`
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]!.trim() === header) {
+      start = i + 1
+      break
+    }
+  }
+  if (start === -1) return null
+
+  let end = lines.length
+  for (let i = start; i < lines.length; i++) {
+    if (/^\s*\[/.test(lines[i]!)) {
+      end = i
+      break
+    }
+  }
+  return { start, end }
+}
+
+/**
+ * 把若干字段写入 TOML 文本，返回新的文本内容。
+ *
+ * 规则：
+ *   - 字段已存在（且未被注释掉）→ 只替换该行的值，保留行尾注释与缩进；
+ *   - 字段不存在 → 在该段落末尾追加一行；
+ *   - 段落不存在 → 在文件末尾追加段落（带一行说明注释）。
+ *
+ * 这是纯函数，不碰磁盘，便于单测与幂等性验证。
+ */
+export function applyTomlUpdates(text: string, updates: WritableField[]): string {
+  let lines = text.split('\n')
+
+  for (const { section, field, tomlLiteral } of updates) {
+    const range = findSectionRange(lines, section)
+
+    if (!range) {
+      // 整段缺失：末尾补一个段落
+      while (lines.length && lines[lines.length - 1]!.trim() === '') lines.pop()
+      lines.push('', `[${section}]`, `${field} = ${tomlLiteral}`, '')
+      continue
+    }
+
+    // 只匹配未被注释掉的行：行首（允许缩进）直接是 `field =`
+    const assignment = new RegExp(`^(\\s*)${field.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*=`)
+    let replaced = false
+    for (let i = range.start; i < range.end; i++) {
+      const m = lines[i]!.match(assignment)
+      if (!m) continue
+      // 保留原行尾注释：`field = old  # 说明`
+      const rest = lines[i]!.slice(m[0].length)
+      const hashIndex = findTrailingComment(rest)
+      const trailing = hashIndex >= 0 ? `  ${rest.slice(hashIndex).trim()}` : ''
+      lines[i] = `${m[1]}${field} = ${tomlLiteral}${trailing}`
+      replaced = true
+      break
+    }
+
+    if (!replaced) {
+      // 段落存在但字段缺失（或被整行注释掉了）：插到段落末尾（跳过尾部空行）
+      let insertAt = range.end
+      while (insertAt > range.start && lines[insertAt - 1]!.trim() === '') insertAt--
+      lines.splice(insertAt, 0, `${field} = ${tomlLiteral}`)
+    }
+  }
+
+  return lines.join('\n')
+}
+
+/** 在值部分里找行尾注释的起点；字符串内的 # 不算 */
+function findTrailingComment(rest: string): number {
+  let inString = false
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i]!
+    if (ch === '\\' && inString) {
+      i++
+      continue
+    }
+    if (ch === '"') inString = !inString
+    else if (ch === '#' && !inString) return i
+  }
+  return -1
+}
+
+/** 写盘结果 */
+export interface WriteConfigResult {
+  ok: boolean
+  path: string | null
+  /** 备份文件路径（若已备份） */
+  backup?: string
+  error?: string
+}
+
+/**
+ * 将白名单字段写入配置文件，并备份原文件。
+ *
+ * 失败时**不抛异常**，返回 `{ ok: false, error }`，由调用方决定怎么提示 ——
+ * 写配置失败不该让整个面板 500。
+ */
+export function writeConfigValues(updates: WritableField[]): WriteConfigResult {
+  if (!IS_SERVER) return { ok: false, path: null, error: '仅在服务端可用' }
+  const path = resolveConfigPath()
+  if (!path) {
+    return { ok: false, path: null, error: '未找到配置文件（licore-site.toml），无法写入' }
+  }
+
+  try {
+    const before = readFileSync(path, 'utf-8')
+    const after = applyTomlUpdates(before, updates)
+
+    // 写前先自检：改完的文本必须仍能被解析，否则宁可整个操作失败，
+    // 也不能把站点配置写成一份语法错误的文件（那会让下次启动退回全部默认值）。
+    try {
+      parseToml(after)
+    } catch (err) {
+      return {
+        ok: false,
+        path,
+        error: `改写后的配置无法解析，已放弃写入：${(err as Error).message}`,
+      }
+    }
+
+    // 备份原文件，便于手工回滚
+    const backup = `${path}.bak`
+    copyFileSync(path, backup)
+
+    writeFileSync(path, after, { encoding: 'utf-8', mode: 0o600 })
+    try { chmodSync(path, 0o600) } catch { /* 某些文件系统不支持 chmod，忽略 */ }
+
+    return { ok: true, path, backup }
+  } catch (err) {
+    return { ok: false, path, error: (err as Error).message }
+  }
 }

@@ -5,7 +5,7 @@
  * 这样 server/utils 里的 node:fs / process.cwd 不会被打进客户端 bundle。
  */
 import { buildDownloads } from '../utils/changelog'
-import { RELEASE_TTL_SECONDS } from '../utils/github'
+import { releaseTtlSeconds } from '../utils/github'
 import { upstreamUnavailable } from '../utils/upstream'
 
 export default defineEventHandler(async (event) => {
@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   setResponseHeader(
     event,
     'cache-control',
-    `public, max-age=60, s-maxage=${RELEASE_TTL_SECONDS}, stale-while-revalidate=${RELEASE_TTL_SECONDS * 2}`,
+    `public, max-age=60, s-maxage=${releaseTtlSeconds()}, stale-while-revalidate=${releaseTtlSeconds() * 2}`,
   )
   setResponseHeader(event, 'access-control-allow-origin', '*')
   setResponseHeader(event, 'access-control-allow-methods', 'GET, OPTIONS')
@@ -25,5 +25,5 @@ export default defineEventHandler(async (event) => {
     return upstreamUnavailable(event, err)
   }
 
-  return { ok: true, ...data, ttlSeconds: RELEASE_TTL_SECONDS }
+  return { ok: true, ...data, ttlSeconds: releaseTtlSeconds() }
 })

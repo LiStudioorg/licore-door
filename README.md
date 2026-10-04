@@ -84,12 +84,16 @@ npm run start        # 等价于 node .output/server/index.mjs
 **查找顺序**（找到第一个就用）：
 `LICORE_SITE_CONFIG` 环境变量 → 进程工作目录 → 项目根目录。
 
-**改完必须重启服务**才会生效：
+**手改文件后需要重启服务**才会生效：
 
 ```bash
 pm2 reload licore-website --update-env   # 或
 sudo systemctl restart licore-website
 ```
+
+> 💡 **例外：在 `/admin` 面板里改的 `[site]` 与 `[display]` 段无需重启**
+> —— 面板保存后会写回本文件并**自动热重载**（见「三、后台管理面板」）。
+> 手改文件、改 `[admin]` / `[github]` 段、改环境变量，仍然要重启。
 
 **容错行为**：配置文件不会让站点挂掉 —— 文件不存在、语法错误、字段类型不对，
 一律退回内置默认值并打印告警，不会白屏。所有告警都会在后台面板顶部汇总显示。
@@ -139,7 +143,44 @@ allowCacheClear = true    # 是否允许在面板上一键清缓存
 | --- | --- |
 | **上游状态** | GitHub 可达性、最近推送时间、响应耗时、token 是否已配置 |
 | **缓存管理** | 列出每个缓存键的年龄 / TTL / 是否新鲜，支持**单项清理**与**一键清空** |
+| **配置编辑** | **可视化修改 `[site]` 与 `[display]` 段**，保存即生效、无需重启，见下 |
 | **生效配置** | 当前加载的配置文件路径、站点地址、TTL、显示开关；**不回显密码**，只告知是否仍是默认值 |
+
+### 配置可视化编辑
+
+面板上的「配置编辑」卡片可以直接改这些字段，**保存后立即生效，不用重启服务**：
+
+| 字段 | 说明 |
+| --- | --- |
+| `site.url` | 站点规范地址（影响 canonical / sitemap） |
+| `site.name` | 站点名称（标题模板、页脚） |
+| `site.icp` | 页脚备案号 / 版权补充 |
+| `display.changelogMaxItems` | 更新日志每个版本默认展开的条数，0 为不限制 |
+| `display.showActivity` | 首页是否显示「最近提交」活动流 |
+
+几个要点：
+
+- **写回的是 `licore-site.toml` 本身**，并且**保留文件里的注释**
+  （只精确替换目标行的值，不是整份重写）。写前自动备份为 `licore-site.toml.bak`。
+- 改写后的文本会先**重新解析一遍**确认语法正确，解析不过就放弃写入 ——
+  绝不会把配置文件写成语法错误的版本。
+- **只提交你改过的字段**（前端按差异提交），没碰的字段不会被重写。
+- 改不动的两类情况，面板会**明确说明原因**而不是静默失败：
+  - 字段被环境变量覆盖（如 `NUXT_PUBLIC_SITE_URL`）→ 显示为只读并提示改环境变量；
+  - `admin.password` / `admin.username` / `github.token` → 不在编辑范围内（见下）。
+
+> 🔒 **为什么密码不能在面板上改**：面板本身已登录，能改密码就等于
+> 「会话被窃取 = 直接丢密码」；而且改完密码不会让已有会话失效。
+> 密码请直接改服务器上的配置文件后重启服务，或用
+> `admin.allowConfigEdit = false` 整体关闭面板编辑。
+
+关闭可视化编辑（只保留只读展示）：
+
+```toml
+[admin]
+allowConfigEdit = false
+```
+
 
 ### 安全设计
 
@@ -156,7 +197,13 @@ allowCacheClear = true    # 是否允许在面板上一键清缓存
 | `POST /api/admin/login` | `{ username, password }` → 写入会话 cookie |
 | `POST /api/admin/logout` | 清除会话，幂等 |
 | `GET /api/admin/status` | 面板数据源（需登录） |
+| `POST /api/admin/token.set` | 设置 / 清除运行时 GitHub Token（需登录） |
+| `POST /api/admin/config.set` | `{ patch: { 'site.url': '...' } }` 写入配置并热重载（需登录 + `allowConfigEdit`） |
 | `POST /api/admin/cache/clear` | `{ key? }`，不传 key 即清空全部（需登录 + `allowCacheClear`） |
+
+公开接口中另有 `GET /api/site-config`，只下发页面渲染需要的展示开关
+（`display.*` 与站点名称/地址），**不含任何敏感字段**。页面靠它拿到
+可在面板里修改的展示配置，从而做到「面板改完，前台刷新即变」。
 
 ---
 
@@ -270,6 +317,7 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 │   ├── composables/
 │   │   ├── useTheme.ts         # 明暗主题
 │   │   ├── useFormat.ts        # 体积 / 日期 / 相对时间格式化
+│   │   ├── useDisplayConfig.ts # 生效的展示开关（面板可改，服务端下发）
 │   │   └── usePageSeo.ts       # 页面 SEO 统一入口（补全分享图字段）
 │   ├── config/site.ts          # 站点常量：域名、关键词、导航、构建矩阵
 │   └── pages/
@@ -278,23 +326,27 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 │       ├── download.vue        # 下载（自动适配二进制 / 源码）
 │       ├── docs.vue            # 使用文档
 │       ├── about.vue           # 关于
-│       └── admin.vue           # 后台管理面板
+│       └── admin.vue           # 后台管理面板（含配置可视化编辑）
 ├── server/
 │   ├── api/                    # JSON 接口
 │   │   ├── changelog.get.ts
 │   │   ├── releases.get.ts
 │   │   ├── repo.get.ts
 │   │   ├── commits.get.ts
+│   │   ├── site-config.get.ts  # 下发展示开关（无敏感字段）
 │   │   ├── status.get.ts       # 公开健康检查
 │   │   └── admin/              # 后台接口（全部需登录）
 │   │       ├── login.post.ts
 │   │       ├── logout.post.ts
 │   │       ├── status.get.ts
+│   │       ├── token.set.post.ts
+│   │       ├── config.set.post.ts  # 配置写入 + 热重载
 │   │       └── cache/clear.post.ts
 │   └── utils/
 │       ├── github.ts           # GitHub 数据层（缓存 / 去重 / 回退 / 可清理）
 │       ├── changelog.ts        # 更新日志与下载项聚合
-│       ├── config.ts           # TOML 配置加载与校验（容错 + 默认值）
+│       ├── config.ts           # TOML 配置加载与校验（容错 + 默认值 + 热重载）
+│       ├── editable-config.ts  # 可编辑字段白名单与校验（面板编辑用）
 │       └── auth.ts             # 后台认证（HMAC 签名会话 cookie）
 ├── public/                     # logo、favicon、og.svg / og.png、robots.txt、manifest
 ├── licore-site.toml            # 站点配置文件（TOML）

@@ -3,14 +3,14 @@
  * 返回自动聚合的更新日志。服务端缓存，客户端可轮询。
  */
 import { buildChangelog } from '../utils/changelog'
-import { RELEASE_TTL_SECONDS } from '../utils/github'
+import { releaseTtlSeconds } from '../utils/github'
 import { upstreamUnavailable } from '../utils/upstream'
 
 export default defineEventHandler(async (event) => {
   setResponseHeader(
     event,
     'cache-control',
-    `public, max-age=60, s-maxage=${RELEASE_TTL_SECONDS}, stale-while-revalidate=${RELEASE_TTL_SECONDS * 2}`,
+    `public, max-age=60, s-maxage=${releaseTtlSeconds()}, stale-while-revalidate=${releaseTtlSeconds() * 2}`,
   )
   setResponseHeader(event, 'access-control-allow-origin', '*')
   setResponseHeader(event, 'access-control-allow-methods', 'GET, OPTIONS')
@@ -35,7 +35,7 @@ export default defineEventHandler(async (event) => {
   return {
     ok: true,
     // 前端需要展示缓存时长，不再直接从 server/utils 引常量（那会把服务端模块打进客户端）
-    ttlSeconds: RELEASE_TTL_SECONDS,
+    ttlSeconds: releaseTtlSeconds(),
     ...log,
     versions,
   }
