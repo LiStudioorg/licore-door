@@ -92,7 +92,8 @@ pm2 -v    # 应输出 5.x
 去 GitHub → Settings → Developer settings → **Personal access tokens → Fine-grained tokens** →
 新建，权限只需要 **Public Repositories → Contents: Read**（只读）。
 
-拿到形如 `ghp_xxx` 或 `github_pat_xxx` 的 token 后留好，下面会用到。
+拿到形如 `ghp_xxx` 或 `github_pat_xxx` 的 token 后留好，**部署完成后再填**
+（见 §3.4，在后台面板里直接粘贴，不用改配置文件也不用重启）。
 
 > 不配也能跑：配额耗尽时页面仍能正常访问，只是实时数据会降级，不影响 SEO。
 
@@ -100,34 +101,46 @@ pm2 -v    # 应输出 5.x
 
 ## 3. 方式 A：PM2 一键部署（推荐）
 
-**优点**：一条命令完成部署、更新、回滚。不需要在服务器上构建，本地构建后传产物即可。
+**优点**：一条命令完成部署、更新、回滚。不需要在服务器上构建，拿到产物即可。
 
-### 3.1 本地构建产物
+### 3.1 获取构建产物
+
+CI 会在每次 `main` 分支校验通过后**自动构建并发行**（打 tag + 发布 Release），
+产物随 Release 一起发布，**不需要在本地构建**：
 
 ```bash
-# 在本地开发机上
-npm ci && npm run build
-# 产物在 .output/ 目录（约 6.5 MB）
-
-# 打包（可选，方便传输）
-tar -czf licore-website-build.tar.gz .output package.json
+# 在服务器上直接下载最新 Release 的产物
+curl -fL -o licore-website-build.tar.gz \
+  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
 ```
+
+也可以打开仓库的 [Releases 页面](https://github.com/LiStudioorg/licore-door/releases)
+手动下载，或从 Actions 页面下载 `licore-website-build` artifact。
+
+> 如需自己在本地构建（例如改了代码但还没推送）：
+> ```bash
+> npm ci && npm run build
+> tar -czf licore-website-build.tar.gz .output package.json deploy/deploy-pm2.sh
+> ```
+> 注意包内要保留 `.output/` 顶层目录，部署脚本靠它定位产物。
 
 ### 3.2 把产物传到服务器
 
 ```bash
-# 把构建产物和部署脚本一起传上去
-scp deploy/deploy-pm2.sh user@server:~/
+# 无需传部署脚本 —— 它已包含在 tar.gz 内。
+# 若用的是旧版本产物，再单独传一次脚本即可。
 scp licore-website-build.tar.gz user@server:~/
+scp deploy/deploy-pm2.sh user@server:~/   # 可选
 ```
 
 ### 3.3 首次部署
 
 ```bash
-# SSH 到服务器后
-bash ~/deploy-pm2.sh --src ~/licore-website-build.tar.gz \
-  --site-url https://licore.z321.cc.cd \
-  --token ghp_xxxxxxxxxxxxxxxxxxxx
+# SSH 到服务器后，解包拿到部署脚本
+tar -xzf ~/licore-website-build.tar.gz -C ~/licore-deploy --one-top-level
+
+bash ~/licore-deploy/deploy-pm2.sh --src ~/licore-website-build.tar.gz \
+  --site-url https://licore.z321.cc.cd
 ```
 
 脚本会自动完成：
@@ -140,32 +153,66 @@ bash ~/deploy-pm2.sh --src ~/licore-website-build.tar.gz \
 7. 健康检查（30 秒内必须响应）
 8. 清理旧版本（默认保留 5 个）
 
-### 3.4 后续更新
+> **GitHub Token 不用在这里传 `--token`**：部署后打开
+> `https://licore.z321.cc.cd/admin` 登录，在「GitHub Token」区域直接粘贴即可，
+> 立即生效且不用重启（见 §3.4）。
+
+### 3.4 配置 GitHub Token（在后台面板里填）
+
+部署完成后打开 `https://你的域名/admin`，用 `licore-site.toml` 里的
+`[admin]` 账号密码登录，在页面顶部的 **GitHub Token** 区域粘贴 token，点「保存」。
+
+**立即生效，不需要重启服务，也不需要改配置文件。**
+
+token 的生效优先级（从高到低）：
+
+| 来源 | 说明 |
+| --- | --- |
+| 环境变量 `GITHUB_TOKEN` / `GH_TOKEN` | 优先级最高，适合容器化部署 |
+| **后台面板写入** | 存在工作目录的 `licore-runtime-token`（权限 `0600`） |
+| `licore-site.toml` 的 `[github].token` | 静态配置，改完要重启 |
+
+面板上会显示当前 token 来自哪个来源。点「清除」可删掉面板写入的 token，
+回退到环境变量或 TOML。
+
+> 想用命令行配置（不想开面板）也行，任选一种：
+> ```bash
+> # 方式 1：写运行时文件（和面板写入等效，立即生效）
+> printf '%s\n' 'ghp_xxx' > /opt/licore-website/licore-runtime-token
+> chmod 600 /opt/licore-website/licore-runtime-token
+>
+> # 方式 2：写进 TOML（改完要 pm2 reload）
+> nano /opt/licore-website/licore-site.toml   # 填 [github].token = "ghp_xxx"
+> pm2 reload licore-website --update-env
+> ```
+>
+> `licore-runtime-token` 已在 `.gitignore` 里，不会被误提交。
+
+### 3.5 后续更新
 
 ```bash
-# 本地重新构建 + 传产物
-npm run build
-tar -czf licore-website-build.tar.gz .output package.json
-scp licore-website-build.tar.gz user@server:~/
-
-# 服务器上一键更新（token 会自动沿用上次配置）
-bash ~/deploy-pm2.sh --src ~/licore-website-build.tar.gz
+# 服务器上一条命令搞定：下载最新产物 + 发布
+curl -fL -o /tmp/build.tar.gz \
+  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
+bash ~/licore-deploy/deploy-pm2.sh --src /tmp/build.tar.gz
 ```
 
-### 3.5 常用参数
+### 3.6 常用参数
 
 ```bash
 bash deploy-pm2.sh --src <产物> \
   --port 3000 \                    # 监听端口（默认 3000）
   --host 127.0.0.1 \               # 监听地址（默认 127.0.0.1，公网访问走 Nginx）
   --site-url https://xxx.com \     # 站点规范地址
-  --token ghp_xxx \                # GitHub token（省略则沿用上次）
   --app-dir /opt/licore-website \  # 应用根目录（默认 /opt/licore-website）
   --keep 5 \                       # 保留最近几个版本（默认 5）
   --no-pm2                         # 只发布文件，不启动 PM2（预演/排障用）
 ```
 
-### 3.6 PM2 管理命令
+> 不再推荐用 `--token` 传 GitHub token：那会写进 TOML 且需要重启。
+> 用后台面板更省事（见 §3.4）。
+
+### 3.7 PM2 管理命令
 
 ```bash
 pm2 status                              # 查看进程状态
@@ -177,7 +224,7 @@ pm2 save                                # 保存进程列表（配合 startup �
 pm2 startup                             # 设置开机自启（按提示执行输出命令）
 ```
 
-### 3.7 修改后台密码
+### 3.8 修改后台密码
 
 ```bash
 # 编辑配置文件

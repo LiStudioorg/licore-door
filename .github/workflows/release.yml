@@ -1,0 +1,149 @@
+name: Release
+
+# 在 CI 校验通过后自动发行：打 tag + 发布 GitHub Release，附构建产物 tar.gz。
+#
+# ⚠️ 本工作流**只做构建与发行**，不连接任何服务器、不做部署。
+#    部署请按 DEPLOY.md 手动执行（下载 Release 里的 tar.gz，
+#    再用 deploy/deploy-pm2.sh 发布）。
+#
+# 版本号规则：主次版本号取自 package.json 的 version，补丁号在
+# 已有 tag 的基础上自动 +1。例如 package.json 是 1.0.0、最新 tag 是
+# v1.0.7，则本次发行 v1.0.8。
+#
+# 触发方式：CI 在 main 上成功后自动触发；也可在 Actions 页面手动触发。
+on:
+  workflow_run:
+    # 等 CI 跑完再发行，保证只发行构建通过的提交
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # 创建 tag 与 Release 需要写权限
+
+jobs:
+  release:
+    name: 构建并发行
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # 只有 CI 成功时才发行；手动触发时跳过该判断
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # workflow_run 触发时默认检出的是默认分支的最新提交，
+          # 必须显式指定 CI 那次跑的确切 commit，否则可能发行错版本
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # 需要完整历史来列举已有 tag
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --registry=https://registry.npmjs.org
+
+      - name: 计算版本号
+        id: version
+        run: |
+          set -euo pipefail
+
+          # 当前提交已经有 tag 就跳过，避免重复发行
+          HEAD_SHA=$(git rev-parse HEAD)
+          EXISTING=$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+          if [ -n "$EXISTING" ]; then
+            echo "::notice::提交 ${HEAD_SHA:0:7} 已发行过 ${EXISTING}，跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 版本号 = 已有最大 tag 的补丁号 +1。
+          # 若 package.json 的主次号比最大 tag 更新（例如刚把 1.0 改成 2.0），
+          # 则以 package.json 为准，从 .0 重新起算 —— 这样既不会算出倒退的
+          # 版本号，也允许通过改 package.json 主动跨大版本。
+          BASE=$(node -p "require('./package.json').version")
+          BASE_MAJOR=$(echo "$BASE" | cut -d. -f1)
+          BASE_MINOR=$(echo "$BASE" | cut -d. -f2)
+
+          LATEST=$(git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -1 || true)
+
+          if [ -z "$LATEST" ]; then
+            NEXT="v${BASE_MAJOR}.${BASE_MINOR}.0"
+          else
+            LATEST_MAJOR=$(echo "$LATEST" | cut -d. -f1 | tr -d v)
+            LATEST_MINOR=$(echo "$LATEST" | cut -d. -f2)
+            LATEST_PATCH=$(echo "$LATEST" | cut -d. -f3)
+
+            if [ "$BASE_MAJOR" -gt "$LATEST_MAJOR" ] || \
+               { [ "$BASE_MAJOR" -eq "$LATEST_MAJOR" ] && [ "$BASE_MINOR" -gt "$LATEST_MINOR" ]; }; then
+              NEXT="v${BASE_MAJOR}.${BASE_MINOR}.0"
+            else
+              NEXT="v${LATEST_MAJOR}.${LATEST_MINOR}.$((LATEST_PATCH + 1))"
+            fi
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "本次发行版本：$NEXT（package.json 为 $BASE，上一个 tag 为 ${LATEST:-无}）"
+
+      - name: 生产构建
+        if: steps.version.outputs.skip == 'false'
+        run: npm run build
+        env:
+          # 构建期只需要站点地址；GitHub 数据是运行时拉取的，这里不需要 token
+          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'http://licore.z321.cc.cd' }}
+
+      - name: 打包部署产物
+        if: steps.version.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # 只打运行必需的产物 + 部署脚本，不包含源码与 node_modules。
+          # 服务器端可直接：bash deploy-pm2.sh --src licore-website-build.tar.gz
+          mkdir -p release-bundle
+          cp -r .output release-bundle/.output
+          cp package.json release-bundle/package.json
+          cp deploy/deploy-pm2.sh release-bundle/deploy-pm2.sh
+
+          tar -czf licore-website-build.tar.gz -C release-bundle .
+          ls -lh licore-website-build.tar.gz
+
+          # 校验压缩包可解且含入口文件，避免发出一个坏包
+          tar -tzf licore-website-build.tar.gz | grep -q '^\./\.output/server/index\.mjs$'
+          echo "产物校验通过"
+
+      - name: 推送 tag
+        if: steps.version.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" -m "发行 $TAG"
+          git push origin "$TAG"
+
+      - name: 发布 Release
+        if: steps.version.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --target "${{ github.event.workflow_run.head_sha || github.sha }}" \
+            licore-website-build.tar.gz

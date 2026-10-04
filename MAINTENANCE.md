@@ -420,6 +420,7 @@ git push origin main
 | `README.md` | 项目说明（给人看） | ⚠️ 功能变化时同步 |
 | `DEPLOY.md` | 部署指南 | ❌ 除非部署方式变了 |
 | `.github/workflows/ci.yml` | CI（类型检查+构建+冒烟） | ❌ 不要动 |
+| `.github/workflows/release.yml` | 自动发行（打 tag + 发 Release） | ❌ 不要动 |
 
 > **注意**：`server/utils/github.ts` 里的 TTL 现在读的是 `licore-site.toml` 的
 > `[github]` 段（`releases` / `repo` / `contributors`，单位秒），

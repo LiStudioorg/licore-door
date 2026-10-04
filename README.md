@@ -150,16 +150,18 @@ allowCacheClear = true    # 是否允许在面板上一键清缓存
 
 ---
 
-## 四、CI
+## 四、CI 与发行
 
-仓库内置**一个** workflow：`.github/workflows/ci.yml`。
+仓库内置**两个** workflow：
 
-| 触发时机 | 作用 |
-| --- | --- |
-| push / PR 到 `main`，或手动触发 | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
+| 文件 | 触发时机 | 作用 |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | push / PR 到 `main`，或手动触发 | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
+| `.github/workflows/release.yml` | CI 成功之后自动触发，或手动触发 | 打 tag → 发布 Release（附 `licore-website-build.tar.gz`） |
 
 > 🚫 **本仓库不含自动部署工作流。**
-> 推送到 `main` **不会**触发任何部署，发布是纯手动的 —— 见下方「五、部署」。
+> 推送到 `main` 会**构建并发版**，但**不会**碰任何服务器 ——
+> 部署仍是手动的，见下方「五、部署」。
 
 CI 会真的把 `.output` 跑起来并断言：
 
@@ -170,20 +172,29 @@ CI 会真的把 `.output` 跑起来并断言：
 > 注意：本站是 SSR 动态站点，**即使 GitHub 上游不可达，页面也会降级渲染并返回 200**。
 > 所以断言 200 是合理的。鉴权断言则相反：它断言的是**必须失败**。
 
+### 版本号规则
+
+发行版本号形如 `v1.0.3`：
+
+- **补丁号自动递增** —— 取已有最大 tag 的补丁号 +1
+- **主次号取自 `package.json` 的 `version`** —— 想主动跨小版本/大版本，
+  改 `package.json` 后推送即可（若新主次号更大，则从 `.0` 起算，不会倒退）
+- 同一个 commit 已经打过 tag 时会自动跳过，不会重复发行
+
 ### 如何发布
 
-手动执行，二选一：
+推送代码即可，CI 构建通过后自动发行：
 
 ```bash
-# 方式 A：本地构建后把产物传上去（推荐）
-npm ci && npm run build
-rsync -av --delete .output/ user@server:/opt/licore-website/current/.output/
-ssh user@server 'sudo systemctl restart licore-website'
+git push origin main
+```
 
-# 方式 B：在服务器上直接构建
-cd /opt/licore-website
-git pull && npm ci && npm run build
-sudo systemctl restart licore-website
+产物随 Release 发布，服务器上一行命令即可更新：
+
+```bash
+curl -fL -o /tmp/build.tar.gz \
+  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
+bash ~/licore-deploy/deploy-pm2.sh --src /tmp/build.tar.gz
 ```
 
 > 首次部署请看 [DEPLOY.md](./DEPLOY.md)。
