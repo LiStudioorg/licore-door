@@ -103,54 +103,88 @@ pm2 -v    # 应输出 5.x
 
 **优点**：一条命令完成部署、更新、回滚。不需要在服务器上构建，拿到产物即可。
 
-### 3.1 获取构建产物并部署
+### 3.1 一条命令完成部署
 
 CI 会在每次 `main` 分支校验通过后**自动构建并发行**（打 tag + 发布 Release），
-产物随 Release 一起发布。服务器上**一条命令**即可拉取最新版并部署：
+产物随 Release 一起发布。服务器上跑这一条就够了：
 
 ```bash
-# 首次：把脚本拷到服务器（之后就不用再管了）
-scp deploy/deploy-latest.sh user@server:~/
-
-# SSH 到服务器后，一条命令完成下载 + 部署
-bash ~/deploy-latest.sh --site-url https://licore.z321.cc.cd
+curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy/bootstrap.sh | bash
 ```
 
-`deploy-latest.sh` 会自动：
-1. 从 GitHub 下载最新 Release 的产物（私有仓库自动带上鉴权）
-2. 校验产物完整性
-3. 交给 `deploy-pm2.sh` 完成发布
-
-> 若同目录没有 `deploy-pm2.sh`，它会自动从仓库拉一份下来 ——
-> 所以只拷 `deploy-latest.sh` 一个文件就够了。
-
-常用变体：
+带参数时**用环境变量传**，不要用 `bash -s --`（引号很容易出错）：
 
 ```bash
-bash ~/deploy-latest.sh --list          # 列出发行版，不部署
-bash ~/deploy-latest.sh --tag v1.0.3    # 部署指定版本
-bash ~/deploy-latest.sh --dry-run       # 只下载验结构，不发布
-bash ~/deploy-latest.sh --rollback      # 回滚到上一个已部署版本
+curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy/bootstrap.sh \
+  | SITE_URL=https://licore.z321.cc.cd PORT=3000 bash
+```
+
+支持的环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SITE_URL` | `http://licore.z321.cc.cd` | 站点规范地址 |
+| `PORT` | `3000` | 监听端口 |
+| `HOST` | `127.0.0.1` | 监听地址（公网走 Nginx） |
+| `APP_DIR` | `/opt/licore-website` | 应用根目录 |
+| `KEEP` | `5` | 保留几个旧版本用于回滚 |
+| `TAG` | 最新 | 指定发行版，如 `v1.0.1` |
+| `ARGS` | 空 | 额外参数，如 `ARGS="--dry-run"` |
+
+**更稳妥的用法**（先把脚本落盘看一眼再执行，排障也方便）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy/bootstrap.sh -o bootstrap.sh
+less bootstrap.sh
+bash bootstrap.sh
+```
+
+三个脚本的分工：
+
+```
+bootstrap.sh      取脚本 + 校验 + 转交（就是上面这条命令跑的东西）
+  └─ deploy-latest.sh   从 GitHub Release 下载最新产物
+       └─ deploy-pm2.sh 发布：版本化目录 + 原子切软链 + PM2 重载 + 健康检查 + 失败回滚
+```
+
+脚本会落盘到 `~/.licore-deploy/`，之后可以直接复跑，不必再走 `curl`：
+
+```bash
+bash ~/.licore-deploy/deploy-latest.sh              # 更新到最新版
+bash ~/.licore-deploy/deploy-latest.sh --list       # 列出发行版
+bash ~/.licore-deploy/deploy-latest.sh --tag v1.0.1 # 部署指定版本
+bash ~/.licore-deploy/deploy-latest.sh --dry-run    # 只下载验结构，不发布
+bash ~/.licore-deploy/deploy-latest.sh --rollback   # 回滚到上一版
 ```
 
 其余参数（`--port` / `--host` / `--site-url` / `--app-dir` / `--keep` / `--no-pm2`）
 原样透传给 `deploy-pm2.sh`。
 
-#### 私有仓库的鉴权
+#### 关于鉴权
 
-本仓库是私有的，下载 Release 需要凭据。脚本会按顺序自动查找：
+本仓库是**公开**的，下载脚本与 Release 产物都不需要任何凭据 ——
+上面那条 `curl | bash` 直接就能跑。
+
+如果将来仓库改回私有，脚本仍能工作，会按顺序自动查找凭据：
 
 1. 环境变量 `GITHUB_TOKEN` / `GH_TOKEN`
 2. `--token` 参数
 3. `~/.git-credentials` 里 `github.com` 的 token
 4. 已部署的 `/opt/licore-website/ecosystem.config.cjs` 里的 `GITHUB_TOKEN`
 
+此时引导命令需要带上鉴权头：
+
+```bash
+curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy/bootstrap.sh | bash
+```
+
 > 第 4 条意味着：**首次部署后，后续更新无需再提供任何凭据**。
 
 #### 手动下载（不想用脚本时）
 
 ```bash
-curl -fL -H "Authorization: Bearer $GITHUB_TOKEN" -o build.tar.gz \
+curl -fL -o build.tar.gz \
   https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
 bash deploy-pm2.sh --src build.tar.gz
 ```
