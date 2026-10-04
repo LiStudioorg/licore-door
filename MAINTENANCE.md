@@ -328,20 +328,21 @@ git push origin main
 1. **绝不手写版本号或下载链接**。版本数据由 `server/utils/changelog.ts`
    运行时自动聚合，手写会与之冲突。
 
-   **上游状态（2026-10 核查）**：仓库有 10 个 tag（v0.1.0 ~ v0.7.0），
-   但 **Release 数量为 0**；不过上游已新增 `.github/workflows/release.yml`，
-   说明官方正在补自动化发布流程。
+   **上游状态（2026-10-04 复核）**：仓库有 **17 个 tag**（v0.1.0 ~ v0.8.0），
+   且**已有 GitHub Release 与二进制资产**（v0.8.0 等，各带 9~12 个产物）。
+   上游 `.github/workflows/release.yml` 已在正常产出。
 
    站点已为此设计成**三级自动适配**，会随上游状态自动切换，你无需干预：
 
    | 上游状态 | 站点行为 |
    | --- | --- |
-   | 有 Release + 二进制资产 | 展示官方二进制下载 |
+   | **有 Release + 二进制资产（当前）** | 展示官方二进制下载 |
    | 有 Release 但无资产 | 用 Release 正文作更新日志 |
-   | **完全没有 Release（当前）** | 以 tag 为版本轴，用相邻 tag 间的提交自动合成日志 |
+   | 完全没有 Release | 以 tag 为版本轴，用相邻 tag 间的提交自动合成日志 |
 
-   所以：**如果哪天你发现下载页开始出现二进制链接了，那是上游发了 Release，
-   站点自动切换的结果，不是 bug，也不需要你改代码。**
+   本站实测（2026-10-04）：`/api/downloads` 返回 `mode: release-assets`、
+   `hasReleases: true`、最新版 v0.8.0 带 9 个下载项 —— 即已自动切到第一档。
+   **这是站点自动切换的结果，不是 bug，也不需要你改代码。**
 2. **绝不在源码里硬编码 GitHub Token**。需要时用环境变量 `GITHUB_TOKEN`。
    仓库是公开的，提交密钥等于泄露。
 3. **改完必须跑第 5 步的验证**。只改文案也要跑 —— 模板里的全角引号、
@@ -366,7 +367,7 @@ git push origin main
 | **`.licore` 不是 OCI** | 任何"兼容 Docker/OCI"的表述都是错的，不要写进官网。 |
 | **Android 无 Root 不支持** | 这是官方明确立场，描述 Android 支持时不能含糊。 |
 | **历史 tag v0.1.0~v0.6.1 是 Boxli** | 项目 v0.7.0 从 Boxli 更名。描述历史时注意区分，不要把 v0.6.x 说成 LiCore。 |
-| **上游 release.yml 已就位** | 上游已有 `release.yml` 但尚未产生 Release。若下载页突然出现二进制链接，属站点自动切换，不要改代码去"修"它。 |
+| **上游已有 Release 资产** | 上游 `release.yml` 已在产出 Release（v0.8.0 等带二进制）。下载页出现二进制链接是站点自动切换（`mode: release-assets`），不要改代码去"修"它。 |
 | **`/admin` 也是 200** | 后台面板页本身返回 200（登录表单靠客户端渲染），所以冒烟测试里 `/admin` 也应该是 200。**未登录时 `/api/admin/*` 返回 401 是正确的**，不要把它当故障。 |
 | **本站配置是 TOML，上游是 YAML** | 别把两者搞混：`licore-site.toml` 是**官网自己**的配置；LiCore 引擎用 `~/.licore/config.yaml`，上游 `AGENTS.md` 明确规定"不要混用 TOML/JSON 配置文件"。写官网文案时不要声称 LiCore 用 TOML。 |
 | **`echo "$HTML" \| grep -q` 在 pipefail 下会假阴性** | `grep -q` 匹配到立刻退出，`echo` 继续写已关闭的管道触发 SIGPIPE，pipeline 整体非 0，断言被误判失败（`<title>` 在页首最容易踩中，CI 实际红过一次）。冒烟脚本里判定大段 HTML 一律**先落盘再 `grep -q needle file`**，别走管道。 |

@@ -9,6 +9,7 @@ import {
   Boxes,
   Cpu,
   ShieldCheck,
+  AlertTriangle,
   Cloud,
   Rocket,
   ArrowRight,
@@ -250,6 +251,8 @@ licore stats                                              # 实时查看容器�
                       { cmd: 'licore images', desc: '列出本地镜像' },
                       { cmd: 'licore tag / commit / save / load', desc: '镜像产物操作' },
                       { cmd: 'licore export / import', desc: '镜像导出为 .licore 与反向导入' },
+                      { cmd: 'licore rmi', desc: '删除本地镜像，支持 -f 强制删除仍被容器引用的镜像' },
+                      { cmd: 'licore convert', desc: '把 Docker 镜像转成 .licore（支持批量与直接导入）' },
                       { cmd: 'licore pull / push', desc: '从 Hub 拉取或推送镜像（也支持本地文件导入）' },
                       { cmd: 'licore login / search', desc: 'Hub 登录令牌与镜像搜索' },
                       { cmd: 'licore network', desc: '网络管理：ls / create / inspect / rm / connect' },
@@ -468,6 +471,62 @@ licore run --pids-limit 100 demo:v1  # 进程数上限
 licore resource info                 # 查看宿主机支持的能力
 licore stats                         # 实时用量</code></pre>
             </div>
+          </section>
+
+          <!-- 容器权限隔离 -->
+          <section id="isolation" class="scroll-mt-24">
+            <h2 class="flex items-center gap-2 text-2xl font-bold tracking-tight">
+              <ShieldCheck class="size-5 text-primary" aria-hidden="true" />
+              容器权限隔离
+            </h2>
+            <div
+              class="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm leading-6"
+            >
+              <AlertTriangle class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+              <span>
+                <strong class="text-foreground">v0.8.0 之前的版本没有 capability 隔离。</strong>
+                在 root 下运行时，容器内进程即宿主 root 且持有全部 capability，
+                没有 cap-drop 也没有 seccomp。如果还在用 v0.7.x 或更早版本，
+                <strong class="text-foreground">请不要运行不可信镜像</strong>。
+              </span>
+            </div>
+            <p class="mt-4 text-sm leading-7 text-muted-foreground">
+              v0.8.0 起默认启用三层防护。这三层<strong class="text-foreground">尚未在真机验证</strong>，
+              在自行确认之前仍不建议用 LiCore 运行不可信镜像。
+            </p>
+            <div class="mt-4 overflow-hidden rounded-xl border border-border">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th class="px-4 py-3 font-medium">层</th>
+                    <th class="px-4 py-3 font-medium">默认行为</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="border-t border-border">
+                    <td class="whitespace-nowrap px-4 py-3 align-top"><code class="font-mono text-xs">PR_SET_NO_NEW_PRIVS</code></td>
+                    <td class="px-4 py-3 text-muted-foreground">始终开启，阻止经 execve 提权（setuid / file capabilities）</td>
+                  </tr>
+                  <tr class="border-t border-border">
+                    <td class="whitespace-nowrap px-4 py-3 align-top"><code class="font-mono text-xs">capability 裁剪</code></td>
+                    <td class="px-4 py-3 text-muted-foreground">丢光后只放回 Docker 默认集（14 项），拿掉 CAP_SYS_ADMIN 等高危能力</td>
+                  </tr>
+                  <tr class="border-t border-border">
+                    <td class="whitespace-nowrap px-4 py-3 align-top"><code class="font-mono text-xs">seccomp 黑名单</code></td>
+                    <td class="px-4 py-3 text-muted-foreground">31 条危险系统调用返回 EPERM，纵深防御第二层</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="mt-4">
+              <pre class="code-block"><code>licore run myapp:v1                                    # 默认集（与 Docker 默认一致）
+licore run --cap-add SYS_PTRACE myapp:v1               # 追加能力
+licore run --cap-drop NET_RAW myapp:v1                 # 从默认集移除
+licore run --cap-drop ALL --cap-add NET_BIND_SERVICE myapp:v1   # 清空后只留指定项</code></pre>
+            </div>
+            <p class="mt-3 text-xs text-muted-foreground">
+              能力名大小写不敏感，<code class="rounded bg-muted px-1 py-0.5">CAP_</code> 前缀可带可不带。
+            </p>
           </section>
 
           <!-- 开机自启 -->

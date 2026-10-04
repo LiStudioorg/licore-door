@@ -156,7 +156,7 @@ const features = [
   {
     icon: Feather,
     title: '极轻运行时',
-    desc: '常驻内存目标 10–20 MiB，单个静态二进制。除可选的 internal/execns 外全部为纯 Go 实现。',
+    desc: '常驻内存目标 10–20 MiB，单个二进制。全仓库零 CGO（CGO_ENABLED=0），Linux 产物为静态链接。',
   },
   {
     icon: Layers,
@@ -281,6 +281,17 @@ const TYPE_COLORS: Record<string, string> = {
             <span class="mx-1.5">·</span>
             版本数据实时同步自 GitHub
           </p>
+
+          <div
+            class="mx-auto mt-8 flex max-w-2xl items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-left text-xs leading-6"
+          >
+            <ShieldCheck class="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+            <span>
+              <strong class="text-foreground">v0.8.0 之前没有 capability 隔离</strong>，
+              root 下容器内进程即宿主 root。仍在用 v0.7.x 或更早版本的话，请不要运行不可信镜像。
+              <NuxtLink to="/docs#isolation" class="text-primary underline underline-offset-2">查看隔离说明</NuxtLink>
+            </span>
+          </div>
         </div>
 
         <!-- 统计 -->
