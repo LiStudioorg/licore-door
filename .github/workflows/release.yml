@@ -116,12 +116,20 @@ jobs:
           cp -r .output release-bundle/.output
           cp package.json release-bundle/package.json
           cp deploy/deploy-pm2.sh release-bundle/deploy-pm2.sh
+          cp deploy/deploy-latest.sh release-bundle/deploy-latest.sh
 
           tar -czf licore-website-build.tar.gz -C release-bundle .
           ls -lh licore-website-build.tar.gz
 
-          # 校验压缩包可解且含入口文件，避免发出一个坏包
-          tar -tzf licore-website-build.tar.gz | grep -q '^\./\.output/server/index\.mjs$'
+          # 校验压缩包可解且含入口文件，避免发出一个坏包。
+          #
+          # ⚠️ 必须先把清单落盘再 grep，不能写成 `tar -tzf … | grep -q`：
+          # grep -q 匹配到第一条就退出并关闭管道，而 tar 还在往里写剩下的条目，
+          # 会触发 SIGPIPE 让 tar 以非 0 退出，本步骤开着 set -o pipefail
+          # 于是整个 pipeline 被误判为失败（入口文件在最前面，必然踩中）。
+          # 同样的坑在 MAINTENANCE.md 里有记录。
+          tar -tzf licore-website-build.tar.gz > /tmp/bundle-list.txt
+          grep -qx '\./\.output/server/index\.mjs' /tmp/bundle-list.txt
           echo "产物校验通过"
 
       - name: 推送 tag
