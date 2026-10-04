@@ -1,10 +1,14 @@
 # LiCore 官网 robots.txt
+# 注意：Sitemap 必须是绝对地址，且站点域名变更后这里要同步修改
+#（域名同时定义在 app/config/site.ts 与 licore-site.toml，见 MAINTENANCE.md §10）。
+
+Sitemap: http://licore.z321.cc.cd/sitemap.xml
+
 User-agent: *
 Allow: /
-Disallow: /api/
-# 后台管理面板不对外公开，禁止抓取
-Disallow: /admin
 
-# 允许主流搜索引擎抓取全部公开页面
-Sitemap: http://licore.z321.cc.cd/sitemap.xml
-Host: licore.z321.cc.cd
+# 站点 API 返回 JSON，无需抓取
+Disallow: /api/
+
+# 后台管理面板不对外公开
+Disallow: /admin

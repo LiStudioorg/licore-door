@@ -6,9 +6,14 @@ export const site = {
   url: 'http://licore.z321.cc.cd',
   name: 'LiCore',
   title: 'LiCore — 轻量级容器引擎',
-  tagline: '10–20 MiB 常驻内存 · 单二进制分发 · 完全自研生态',
+  /**
+   * 标语只用于 <title> 模板。
+   * 注意：上游 README 实测为"2.3 MiB/容器"（100 容器并发摊薄，见 docs/runtime-benchmark.md），
+   * "10–20 MiB"是目标值而非实测，标语不再写具体数字，避免与上游文档冲突。
+   */
+  tagline: '无守护进程 · 单二进制分发 · 完全自研生态',
   description:
-    'LiCore 是一个用 Go 编写的轻量级容器引擎：常驻内存 10–20 MiB，单二进制分发，覆盖 Linux / Android（有 Root）/ macOS，自研镜像格式 .licore，不依赖 Docker、containerd 或任何 OCI 组件。',
+    'LiCore 是一个用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发，覆盖 Linux / Android（有 Root）/ macOS，自研镜像格式 .licore，不依赖 Docker、containerd 或任何 OCI 组件。',
   keywords: [
     'LiCore',
     'licore',

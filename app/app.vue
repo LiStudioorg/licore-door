@@ -2,15 +2,24 @@
 import { site } from '~/config/site'
 
 const { init } = useTheme()
+const route = useRoute()
+
+/**
+ * canonical 必须是响应式的。
+ * 早先写成 `href: ${site.url}${useRoute().path}` —— 字符串在 setup 时求值一次，
+ * 服务端渲染每页都是对的，但客户端路由切换后 app.vue 的 setup 不会重跑，
+ * 于是 <link rel="canonical"> 一直指向进入本站时的那个路径。
+ */
+const canonicalUrl = computed(() => `${site.url}${route.path}`)
 
 // 页面级默认 SEO；各页面用 useSeoMeta 覆盖
 useHead({
   titleTemplate: (title?: string) =>
     title ? `${title} | ${site.name}` : `${site.name} — ${site.tagline}`,
-  link: [
-    { rel: 'canonical', href: `${site.url}${useRoute().path}` },
-    { rel: 'alternate', hreflang: 'zh-CN', href: `${site.url}${useRoute().path}` },
-  ],
+  link: computed(() => [
+    { rel: 'canonical', href: canonicalUrl.value },
+    { rel: 'alternate', hreflang: 'zh-CN', href: canonicalUrl.value },
+  ]),
 })
 
 useSeoMeta({
