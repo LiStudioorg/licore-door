@@ -362,7 +362,8 @@ git push origin main
 | --- | --- |
 | **全角引号** | 模板属性里不能出现 `"` `"`，会截断字符串导致编译失败。文案里要表达引号时用「」或去掉。 |
 | **端口 3000/3001 都被占用** | 这台机器上 3000 与 3001 都有别的服务在监听。测试前先 `ss -ltn \| grep :3111` 确认空闲，用 3111 之类的高位端口。 |
-| **`pkill -f nuxt` 会杀掉自己** | 该模式会匹配到执行它的 shell 本身。用 `kill %1 2>/dev/null   # 或按 PID kill：pgrep -f "server/index.mjs"` 按端口清理。 |
+| **`pkill -f nuxt` 会杀掉自己** | 该模式会匹配到执行它的 shell 本身。**一律按端口反查 PID 来清理**：`pid=$(ss -ltnp \| grep ':3111 ' \| grep -oE 'pid=[0-9]+' \| head -1 \| cut -d= -f2); [ -n "$pid" ] && kill "$pid"`。不要用 `kill %1` —— 在脚本里 `%1` 可能指向别的任务（见第 6 节「重新构建后必须先重启测试服务」）。 |
+| **重新构建后必须先重启测试服务，否则验证会假失败** | `npm run build` 只更新 `.output/`，**不会**影响已经在跑的 `node .output/server/index.mjs` —— 旧进程仍在内存里跑着旧代码，继续对旧端口回旧 HTML。此时冒烟测试会"证明"你的修改没生效（实测踩过两次：改了文案却仍抓到旧字符串、改了校验却仍报旧错误），很容易误判成代码没改对。**正确顺序**：改代码 → `npm run build` → **先按端口杀掉旧进程**（方法见上一行）→ 再启动新的 → 然后验证。想确认跑的是不是新进程，可看启动时间：`ps -o lstart= -p $pid`。 |
 | **GitHub 配额** | 匿名 60 次/小时，很容易耗尽。配额为 0 时页面仍返回 200（降级渲染），但 `/api/status` 会报 503。改文案不需要访问 GitHub，不受影响。 |
 | **`.licore` 不是 OCI，但 Docker 镜像可以转换** | 两件事要分清：① **格式/运行时层面互不兼容** —— `.licore` 是自研格式，不能由 Docker 构建或运行，LiCore 运行时也不能直接跑 OCI 镜像，`licore pull` 的 Hub 与 Docker Registry 无关。所以**不要**写"兼容 OCI""Docker 替代品（可直接跑 Docker 镜像）"这类表述。② **但存在一条转换路径** —— `licore convert <docker 镜像>` 会调用本机 `docker export`/`inspect` 把现成 Docker 镜像转成 `.licore`（单向，需本机有 docker CLI）。这是**转换**，不是**兼容**。 |
 | **上游 FAQ 与 convert 冲突** | 上游 `README` 的 FAQ#2 仍写着"不做镜像格式转换"，但同一份 README 的《从 Docker 镜像转换（convert）》章节正是做这件事（`docs/convert.md` 有完整参数表）。**以 convert 章节与 `docs/convert.md` 为准**，FAQ#2 是上游文档没同步。官网文案只描述 convert 的**用途与用法**，不要借它宣称兼容 Docker/OCI 生态。 |
@@ -433,31 +434,6 @@ git push origin main
 
 ---
 
-## 10. 后台面板与配置文件（非内容维护，但别改坏）
-
-站点有一个后台面板 `/admin`，账号密码在 `licore-site.toml` 的 `[admin]` 段
-（默认 `admin` / `admin`）。相关文件：
-
-| 文件 | 作用 |
-| --- | --- |
-| `licore-site.toml` | 站点配置：站点地址、后台账号、GitHub token、缓存 TTL、显示开关 |
-| `server/utils/config.ts` | 加载并校验 TOML；任何错误都回退默认值，**绝不让站点挂掉** |
-| `server/utils/auth.ts` | HMAC 签名会话 cookie；未登录一律 401 |
-| `server/api/admin/*` | 登录 / 登出 / 状态 / 清缓存 |
-
-**做内容同步时你不需要碰这些**。只有一条要注意：
-
-- 如果你改动了 `app/config/site.ts` 的 `description`（第 3.4 节），
-  记得 `licore-site.toml` 里的 `site.url` 与 `app/config/site.ts` 的 `site.url`
-  是**两个地方**（前者优先级更高，因为它在运行时覆盖后者）。
-  换域名时**两边都要改**，否则 sitemap 与 canonical 会不一致。
-
-配置文件是**容错**的：字段类型写错只会让该字段回退默认值，其余字段照常生效，
-并打印告警（后台面板顶部也会汇总显示）。所以你不必担心手滑改坏站点，
-但改完仍要跑第 5 节的验证。
-
----
-
 ## 9. 快速开始（复制即用）
 
 ```bash
@@ -483,10 +459,43 @@ curl -sS -H "Authorization: Bearer $TOKEN" -H "User-Agent: dsh" \
 npm run typecheck && npm run build
 
 # 4. 冒烟测试
+#    先杀掉可能还占着测试端口的旧进程，否则你会拿到旧代码回的旧 HTML，
+#    误以为自己的修改没生效（见第 6 节「重新构建后必须先重启测试服务」）。
+pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+[ -n "$pid" ] && kill "$pid" && sleep 1
+
 PORT=3111 HOST=127.0.0.1 node .output/server/index.mjs &
 sleep 6
 for p in / /changelog /download /docs /about; do
   curl -s -o /dev/null -w "$p → %{http_code}\n" "http://127.0.0.1:3111$p"
 done
-kill %1 2>/dev/null   # 或按 PID kill：pgrep -f "server/index.mjs"
+
+# 清理：仍按端口反查 PID，不要用 kill %1（脚本里 %1 可能指向别的任务）
+pid=$(ss -ltnp | grep ':3111 ' | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+[ -n "$pid" ] && kill "$pid"
 ```
+
+---
+
+## 10. 后台面板与配置文件（非内容维护，但别改坏）
+
+站点有一个后台面板 `/admin`，账号密码在 `licore-site.toml` 的 `[admin]` 段
+（默认 `admin` / `admin`）。相关文件：
+
+| 文件 | 作用 |
+| --- | --- |
+| `licore-site.toml` | 站点配置：站点地址、后台账号、GitHub token、缓存 TTL、显示开关 |
+| `server/utils/config.ts` | 加载并校验 TOML；任何错误都回退默认值，**绝不让站点挂掉** |
+| `server/utils/auth.ts` | HMAC 签名会话 cookie；未登录一律 401 |
+| `server/api/admin/*` | 登录 / 登出 / 状态 / 清缓存 |
+
+**做内容同步时你不需要碰这些**。只有一条要注意：
+
+- 如果你改动了 `app/config/site.ts` 的 `description`（第 3.4 节），
+  记得 `licore-site.toml` 里的 `site.url` 与 `app/config/site.ts` 的 `site.url`
+  是**两个地方**（前者优先级更高，因为它在运行时覆盖后者）。
+  换域名时**两边都要改**，否则 sitemap 与 canonical 会不一致。
+
+配置文件是**容错**的：字段类型写错只会让该字段回退默认值，其余字段照常生效，
+并打印告警（后台面板顶部也会汇总显示）。所以你不必担心手滑改坏站点，
+但改完仍要跑第 5 节的验证。
