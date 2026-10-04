@@ -95,7 +95,7 @@ async function copy(text: string, key: string) {
 const buildSteps = computed(() => [
   {
     title: '安装 Go 工具链',
-    desc: 'LiCore 使用纯 Go 编写，需要 Go 1.21 或更高版本（Android cgo 构建另需 NDK）。',
+    desc: 'LiCore 使用纯 Go 编写，需要 Go 1.21 或更高版本。所有目标都是 CGO_ENABLED=0 的产物，不需要 C 工具链或 Android NDK。',
     code: 'go version   # 确认已安装 Go',
   },
   {
@@ -159,7 +159,7 @@ useHead({
         name: site.name,
         softwareVersion: latest?.versionNumber ?? undefined,
         applicationCategory: 'DeveloperApplication',
-        operatingSystem: 'Linux, Android, macOS',
+        operatingSystem: 'Linux, Android, macOS, Windows (WSL2)',
         url: site.url,
         downloadUrl: `${site.url}/download`,
         license: 'https://www.gnu.org/licenses/agpl-3.0.html',
@@ -306,9 +306,13 @@ useHead({
           <section aria-labelledby="matrix-heading">
             <h2 id="matrix-heading" class="text-xl font-bold tracking-tight">构建矩阵</h2>
             <p class="mt-3 text-sm leading-7 text-muted-foreground">
-              上游 Makefile 可交叉编译下列目标。纯 Go 目标不需要额外工具链；
-              Android 的 cgo 构建（<code class="rounded bg-muted px-1.5 py-0.5 text-xs">licore exec</code> 所需）
-              依赖 NDK，缺失时会明确警告并降级为纯 Go。
+              上游 Makefile 可交叉编译下列目标。全部是 <code class="rounded bg-muted px-1.5 py-0.5 text-xs">CGO_ENABLED=0</code>
+              的纯 Go 产物，<strong class="text-foreground">不需要任何 C 工具链或 NDK</strong>。
+              <code class="rounded bg-muted px-1.5 py-0.5 text-xs">licore exec</code> 是否可用取决于
+              <strong class="text-foreground">运行环境有没有 nsenter</strong>，与编译方式无关：
+              探测顺序为 <code class="rounded bg-muted px-1.5 py-0.5 text-xs">nsenter</code> →
+              <code class="rounded bg-muted px-1.5 py-0.5 text-xs">busybox nsenter</code>，
+              都没有时返回带安装指引的错误，其余功能不受影响。
             </p>
 
             <div class="mt-5 overflow-hidden rounded-xl border border-border">
@@ -380,7 +384,7 @@ useHead({
                 <ul class="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
                   <li class="flex gap-2">
                     <CheckCircle2 class="mt-0.5 size-3.5 shrink-0 text-primary" />
-                    Linux 服务器 / Android（需 Root）/ macOS
+                    Linux 服务器 / Android（需 Root）/ macOS / Windows（WSL2 或虚拟机）
                   </li>
                   <li class="flex gap-2">
                     <CheckCircle2 class="mt-0.5 size-3.5 shrink-0 text-primary" />
@@ -413,7 +417,7 @@ useHead({
                   </li>
                   <li class="flex gap-2">
                     <Info class="mt-0.5 size-3.5 shrink-0 text-primary" />
-                    Android cgo 构建需设置 ANDROID_NDK_HOME
+                    全平台无需 C 工具链或 NDK（CGO_ENABLED=0）
                   </li>
                 </ul>
               </Card>

@@ -171,8 +171,11 @@ useHead({
               <pre class="code-block"><code># 方式一：源码编译并安装到 /usr/local/bin
 git clone {{ repo.url }}.git
 cd licore
-make VERSION=0.7.0 all
+make all            # 默认构建 linux/amd64、linux/arm64、android/arm64
 sudo make install
+
+# 需要指定版本号时可注入（可选，不写则由构建脚本决定）
+make VERSION=1.2.3 all
 
 # 方式二：已拿到二进制，手动放置
 install -m 0755 licore-linux-amd64 /usr/local/bin/licore
@@ -183,7 +186,7 @@ licore --version</code></pre>
                 type="button"
                 class="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                 aria-label="复制安装命令"
-                @click="copy(`git clone ${repo.url}.git && cd licore && make VERSION=0.7.0 all && sudo make install`, 'install')"
+                @click="copy(`git clone ${repo.url}.git && cd licore && make all && sudo make install`, 'install')"
               >
                 <Check v-if="copied === 'install'" class="size-3.5 text-primary" />
                 <Copy v-else class="size-3.5" />

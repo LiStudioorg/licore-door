@@ -13,7 +13,7 @@ export const site = {
    */
   tagline: '无守护进程 · 单二进制分发 · 完全自研生态',
   description:
-    'LiCore 是一个用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发，覆盖 Linux / Android（有 Root）/ macOS，自研镜像格式 .licore，运行时不需要 Docker、containerd 或任何 OCI 组件，并支持把现成 Docker 镜像转为 .licore。',
+    'LiCore 是一个用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发，覆盖 Linux / Android（有 Root）/ macOS / Windows（WSL2），自研 .licore 镜像格式，运行时不需要 Docker、containerd 或任何 OCI 组件，支持转换 Docker 镜像。',
   keywords: [
     'LiCore',
     'licore',
@@ -23,6 +23,7 @@ export const site = {
     'Docker 替代',
     '.licore 镜像',
     'Android 容器',
+    'WSL2 容器',
     '单二进制容器',
     'Boxli',
   ],
@@ -77,7 +78,7 @@ export const buildMatrix = [
     name: 'android-arm64',
     os: 'Android',
     arch: 'arm64',
-    note: '需 Root；带 cgo 时 licore exec 可用',
+    note: '需 Root；系统有 nsenter 时 licore exec 可用',
     recommended: false,
   },
 ] as const

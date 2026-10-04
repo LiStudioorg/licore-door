@@ -102,7 +102,7 @@ useHead({
             alternateName: 'Boxli',
             applicationCategory: 'DeveloperApplication',
             applicationSubCategory: 'Container Engine',
-            operatingSystem: 'Linux, Android, macOS',
+            operatingSystem: 'Linux, Android, macOS, Windows (WSL2)',
             description: site.description,
             url: site.url,
             downloadUrl: `${site.url}/download`,
@@ -166,7 +166,7 @@ const features = [
   {
     icon: Smartphone,
     title: '覆盖 Android',
-    desc: 'Linux 服务器、Android（有 Root）、macOS 三大平台。Android 无 Root 场景官方明确不支持。',
+    desc: 'Linux 服务器、Android（有 Root）、macOS 三大平台，Windows 可经 WSL2 / 虚拟机运行 Linux 版。Android 无 Root 场景官方明确不支持。',
   },
   {
     icon: Cpu,
@@ -251,7 +251,8 @@ const TYPE_COLORS: Record<string, string> = {
 
           <p class="mx-auto mt-6 max-w-2xl text-base leading-8 text-muted-foreground sm:text-lg">
             LiCore 常驻内存仅 <strong class="text-foreground">10–20 MiB</strong>，单二进制分发，
-            覆盖 Linux / Android / macOS。它拥有自研镜像格式与分发体系，
+            覆盖 Linux / Android / macOS，Windows 可经 WSL2 或虚拟机运行。
+            它拥有自研镜像格式与分发体系，
             <strong class="text-foreground">运行时不需要 Docker / OCI</strong>，
             同时支持用 <strong class="text-foreground">licore convert</strong> 把现成 Docker 镜像转成 .licore。
           </p>

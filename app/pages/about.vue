@@ -114,7 +114,7 @@ useHead({
           name: site.name,
           alternateName: 'Boxli',
           applicationCategory: 'DeveloperApplication',
-          operatingSystem: 'Linux, Android, macOS',
+          operatingSystem: 'Linux, Android, macOS, Windows (WSL2)',
           license: 'https://www.gnu.org/licenses/agpl-3.0.html',
           author: { '@type': 'Organization', name: site.author, url: repo.url },
         },
@@ -158,6 +158,7 @@ useHead({
               </p>
               <p>
                 目标平台为 <strong class="text-foreground">Linux 服务器、Android（有 Root）与 macOS</strong>，
+                并可通过 <strong class="text-foreground">WSL2 或虚拟机</strong>在 Windows 上以 Linux 版运行，
                 支持多 CPU 架构，引擎常驻内存目标为
                 <strong class="text-foreground">10–20 MiB</strong>。
               </p>
