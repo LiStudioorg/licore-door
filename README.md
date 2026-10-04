@@ -2,7 +2,7 @@
 
 LiCore 官方网站（[github.com/LiStudioorg/licore](https://github.com/LiStudioorg/licore)），
 基于 **Nuxt 4** + **[fuxsto-design](https://npmmirror.com/package/fuxsto-design)** 构建，
-是一个**服务端渲染的动态站点**，部署在服务器上运行。
+是一个**服务端渲染的动态站点**。
 
 站点的更新日志、版本列表与下载链接**全部由服务端实时从 GitHub 拉取并聚合**，
 上游发布新版本后无需重新部署，页面刷新即可看到最新数据。
@@ -21,7 +21,7 @@ LiCore 官方网站（[github.com/LiStudioorg/licore](https://github.com/LiStudi
 
 | 机制 | 说明 |
 | --- | --- |
-| **TTL 缓存** | **发行版 / tag / 提交均为 5 分钟**，仓库信息 10 分钟，贡献者 30 分钟 |
+| **TTL 缓存** | 发行版 / tag / 提交均为 5 分钟，仓库信息 10 分钟，贡献者 30 分钟 |
 | **并发去重** | 同一资源的并发请求合并为一次上游调用，避免触发限流 |
 | **stale-while-error** | 上游失败或限流时，回退到最近一次成功的数据，页面不会白屏 |
 | **超时保护** | 单次上游请求 8 秒超时，不会拖死 SSR |
@@ -62,9 +62,31 @@ npm run build
 npm run start        # 等价于 node .output/server/index.mjs
 ```
 
+### 配置文件（TOML）
+
+站点使用 **`licore-site.toml`**（仓库根目录已附带一份，字段含义全部写在文件注释里）。
+
+> ⚠️ 这是**官网自己**的配置，与 LiCore 引擎无关。
+> LiCore 引擎的配置是 `~/.licore/config.yaml`，格式为 **YAML** —— 两者不要搞混。
+
+**优先级**：环境变量 > `licore-site.toml` > 内置默认值。
+
+**查找顺序**（找到第一个就用）：
+`LICORE_SITE_CONFIG` 环境变量 → 进程工作目录 → 项目根目录。
+
+**改完必须重启服务**才会生效：
+
+```bash
+pm2 reload licore-website --update-env   # 或
+sudo systemctl restart licore-website
+```
+
+**容错行为**：配置文件不会让站点挂掉 —— 文件不存在、语法错误、字段类型不对，
+一律退回内置默认值并打印告警，不会白屏。所有告警都会在后台面板顶部汇总显示。
+
 ### 环境变量
 
-在项目根目录创建 `.env`：
+在项目根目录创建 `.env`（本地开发用；生产环境建议用 TOML 或 PM2 ecosystem 管理）：
 
 ```bash
 # 可选：提升 GitHub API 配额（强烈建议在生产环境配置）
@@ -72,60 +94,15 @@ GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
 # 可选：覆盖站点域名（不设置则用 app/config/site.ts 里的默认值）
 NUXT_PUBLIC_SITE_URL=http://licore.z321.cc.cd
-
-# 运行时
-PORT=3000
-HOST=0.0.0.0
-NITRO_PORT=3000
 ```
 
 > `GITHUB_TOKEN` 只需要 **public repo 只读**权限（fine-grained token 勾选
 > Public Repositories 的 Contents: Read 即可）。未配置时匿名配额
-> 60 次/小时。因为发行数据是 5 分钟刷新，**生产环境强烈建议配置 token**，
-> 否则 60 次/小时在高频访问下会很快耗尽（耗尽时页面仍可正常访问，只是实时数据降级）。
+> 60 次/小时。因为发行数据是 5 分钟刷新，**生产环境强烈建议配置 token**。
 
 ---
 
-## 二·补、配置文件（TOML）
-
-除了环境变量，站点还支持一个 TOML 配置文件 **`licore-site.toml`**（仓库根目录已附带一份，
-字段含义全部写在文件注释里）。
-
-> ⚠️ 这是**官网自己**的配置，与 LiCore 引擎无关。
-> LiCore 引擎的配置是 `~/.licore/config.yaml`，格式为 **YAML** —— 上游
-> `AGENTS.md` 明确规定"一律 YAML，不要混用 TOML/JSON 配置文件"。
-> 两者不要搞混。
-
-**优先级**：环境变量 > `licore-site.toml` > 内置默认值。
-（所以 `GITHUB_TOKEN` / `NUXT_PUBLIC_SITE_URL` 设了环境变量就会盖掉文件里的值。）
-
-**查找顺序**（找到第一个就用）：
-`LICORE_SITE_CONFIG` 环境变量指定的路径 → 进程工作目录 → 项目根目录。
-
-**改完必须重启服务**才会生效：
-
-```bash
-sudo systemctl restart licore-website   # 或
-pm2 restart licore-website
-```
-
-### 容错行为
-
-配置文件**不会**让站点挂掉 —— 这是刻意的设计：
-
-| 情况 | 行为 |
-| --- | --- |
-| 文件不存在 | 全部用内置默认值，打印一条告警 |
-| TOML 语法错误 | 同上，告警里带上具体出错的行与列 |
-| 字段类型不对（如 `enabled = "yes"`） | 只有该字段回退默认值，其余字段照常生效 |
-| `site.url` 不是 http(s) 绝对地址 | 回退默认值（避免拼出错误的 canonical） |
-| `admin.sessionHours` 为负 | 回退默认值 |
-
-所有告警都会打印到服务日志，并在**后台面板**顶部汇总显示，方便直接定位。
-
----
-
-## 二·补二、后台管理面板（`/admin`）
+## 三、后台管理面板（`/admin`）
 
 站点内置一个运维面板，访问 **`/admin`**。
 
@@ -151,18 +128,16 @@ allowCacheClear = true    # 是否允许在面板上一键清缓存
 | 功能 | 说明 |
 | --- | --- |
 | **上游状态** | GitHub 可达性、最近推送时间、响应耗时、token 是否已配置 |
-| **缓存管理** | 列出每个缓存键的年龄 / TTL / 是否新鲜，支持**单项清理**与**一键清空**，让页面立刻重新拉取上游而不用等 TTL 过期 |
+| **缓存管理** | 列出每个缓存键的年龄 / TTL / 是否新鲜，支持**单项清理**与**一键清空** |
 | **生效配置** | 当前加载的配置文件路径、站点地址、TTL、显示开关；**不回显密码**，只告知是否仍是默认值 |
 
 ### 安全设计
 
-- **HMAC 签名的会话 Cookie**（`HttpOnly` + `SameSite=Lax`），无服务端会话存储。
-  客户端拿不到签名密钥，**无法伪造** cookie；已验证篡改签名与伪造 payload 均返回 401。
-- 账号与密码都用**恒定时间比较**，避免通过响应时间猜密码；登录失败不区分"用户名错"还是"密码错"。
-- `enabled = false` 时，`/admin` 与 `/api/admin/*` **一律返回 404** —— 比只关登录更彻底。
+- **HMAC 签名的会话 Cookie**（`HttpOnly` + `SameSite=Lax`），无服务端会话存储，无法伪造。
+- 账号与密码都用**恒定时间比较**，避免通过响应时间猜密码。
+- `enabled = false` 时，`/admin` 与 `/api/admin/*` **一律返回 404**。
 - 面板页 `noindex, nofollow`，且 `public/robots.txt` 已 `Disallow: /admin`。
-- 会话密钥在进程启动时随机生成，**重启服务会让所有会话失效**（需重新登录）。
-  单机小站这样做足够；要多实例共享会话得改成固定密钥。
+- 会话密钥在进程启动时随机生成，**重启服务会让所有会话失效**。
 
 ### 后台接口
 
@@ -175,184 +150,63 @@ allowCacheClear = true    # 是否允许在面板上一键清缓存
 
 ---
 
-## 三、GitHub Actions 自动化
+## 四、CI
 
 仓库内置**一个** workflow：`.github/workflows/ci.yml`。
 
-| 文件 | 触发时机 | 作用 |
-| --- | --- | --- |
-| `.github/workflows/ci.yml` | push / PR 到 `main`，或手动触发 | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
+| 触发时机 | 作用 |
+| --- | --- |
+| push / PR 到 `main`，或手动触发 | 类型检查 → 生产构建 → **启动产物做冒烟测试** → 上传产物 |
 
-> 🚫 **本仓库不含自动部署工作流**（原先的 `deploy.yml` 已删除）。
-> 推送到 `main` **不会**触发任何部署，发布是纯手动的 —— 见下面「四、部署到服务器」。
-> 这样你可以放心推送代码，不必担心线上被自动改动。
+> 🚫 **本仓库不含自动部署工作流。**
+> 推送到 `main` **不会**触发任何部署，发布是纯手动的 —— 见下方「五、部署」。
 
-### CI 做了什么
+CI 会真的把 `.output` 跑起来并断言：
 
-CI 不只是"能编译"，它会真的把 `.output` 跑起来并断言：
-
-- 8 条路由（`/`、`/changelog`、`/download`、`/docs`、`/about`、`/admin`、`/sitemap.xml`、`/robots.txt`）必须返回 200
-- 5 个 SEO 关键标签必须存在（`<title>`、`canonical`、`og:title`、`description`、JSON-LD）
-- **后台鉴权底线**：未登录访问 `/api/admin/status` 必须 401，错误密码登录必须 401
+- 8 条路由必须返回 200
+- 5 个 SEO 关键标签必须存在
+- **后台鉴权底线**：未登录访问 `/api/admin/status` 必须 401
 
 > 注意：本站是 SSR 动态站点，**即使 GitHub 上游不可达，页面也会降级渲染并返回 200**。
-> 所以断言 200 是合理的，而不是断言页面里必须有实时数据 —— 否则上游一限流 CI 就会红。
->
-> 鉴权断言则相反：它断言的是**必须失败**。一旦有人把后台鉴权改坏（比如漏掉
-> 登录校验），路由仍是 200、页面看起来一切正常，只有这条断言能让 CI 变红。
+> 所以断言 200 是合理的。鉴权断言则相反：它断言的是**必须失败**。
 
 ### 如何发布
 
 手动执行，二选一：
 
 ```bash
-# 方式 A：在服务器上直接构建（推荐，最简单）
-cd /opt/licore-website
-git pull                     # 或上传新的源码包
-npm ci && npm run build
-sudo systemctl restart licore-website   # 或 pm2 restart licore-website
-
-# 方式 B：本地构建后把产物传上去
+# 方式 A：本地构建后把产物传上去（推荐）
 npm ci && npm run build
 rsync -av --delete .output/ user@server:/opt/licore-website/current/.output/
 ssh user@server 'sudo systemctl restart licore-website'
+
+# 方式 B：在服务器上直接构建
+cd /opt/licore-website
+git pull && npm ci && npm run build
+sudo systemctl restart licore-website
 ```
 
-> 首次部署请看 [DEPLOY.md](./DEPLOY.md)，`deploy/install.sh` 会帮你把目录、
-> systemd 服务和 Nginx 都配好。
+> 首次部署请看 [DEPLOY.md](./DEPLOY.md)。
 
 ---
 
-## 四、部署到服务器
+## 五、部署到服务器
 
 > 📘 **完整的部署步骤请看 [DEPLOY.md](./DEPLOY.md)** —— 包含服务器准备、
-> 两种部署方式、Nginx/HTTPS 配置、验证清单、回滚与故障排查表。
-> 本节的 `deploy/` 目录提供可直接使用的 systemd unit 与安装脚本。
+> 三种部署方式、Nginx/HTTPS 配置、验证清单、回滚与故障排查表。
 
 仓库内提供了部署资产：
 
 | 文件 | 用途 |
 | --- | --- |
+| `deploy/deploy-pm2.sh` | **PM2 一键部署/更新脚本**（推荐，首次部署与后续更新同一条命令） |
 | `deploy/install.sh` | 服务器端一键安装：建目录、装 systemd 服务、可选首次构建、可选配 Nginx |
-| `deploy/licore-website.service` | systemd 单元模板（`__APP_DIR__` / `__NODE_BIN__` 由安装脚本替换） |
-| `deploy/ecosystem.config.cjs` | PM2 进程配置（配合 `current` 软链做版本化部署） |
-
-### 方式一：PM2（推荐）
-
-```bash
-npm run build
-
-# 启动
-pm2 start .output/server/index.mjs --name licore-website \
-  --env PORT=3000
-
-# 或使用 ecosystem 文件
-pm2 start ecosystem.config.cjs
-pm2 save
-pm2 startup
-```
-
-`ecosystem.config.cjs` 示例：
-
-```js
-module.exports = {
-  apps: [{
-    name: 'licore-website',
-    script: '.output/server/index.mjs',
-    env: {
-      PORT: 3000,
-      HOST: '127.0.0.1',
-      NUXT_PUBLIC_SITE_URL: 'http://licore.z321.cc.cd',
-      GITHUB_TOKEN: 'ghp_xxx',
-    },
-    max_memory_restart: '512M',
-  }],
-}
-```
-
-### 方式二：systemd
-
-```ini
-# /etc/systemd/system/licore-website.service
-[Unit]
-Description=LiCore Website (Nuxt 4)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/licore-website
-Environment=NODE_ENV=production
-Environment=PORT=3000
-Environment=HOST=127.0.0.1
-Environment=NUXT_PUBLIC_SITE_URL=http://licore.z321.cc.cd
-Environment=GITHUB_TOKEN=ghp_xxx
-ExecStart=/usr/bin/node .output/server/index.mjs
-Restart=always
-RestartSec=5
-User=www-data
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now licore-website
-```
-
-### 方式三：Docker
-
-```dockerfile
-FROM node:24-alpine AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM node:24-alpine
-WORKDIR /app
-COPY --from=build /app/.output ./.output
-ENV NODE_ENV=production PORT=3000 HOST=0.0.0.0
-EXPOSE 3000
-CMD ["node", ".output/server/index.mjs"]
-```
-
-### Nginx 反向代理
-
-```nginx
-server {
-    listen 80;
-    server_name licore.z321.cc.cd;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade           $http_upgrade;
-        proxy_set_header Connection        "upgrade";
-        proxy_read_timeout 60s;
-    }
-
-    # 静态资源长缓存
-    location /_nuxt/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_cache_valid 200 1y;
-        add_header Cache-Control "public, max-age=31536000, immutable";
-    }
-}
-```
-
-> ⚠️ `proxy_set_header Host $host` 必须带上，否则站点生成的绝对地址会不正确。
-> 如果 Nginx 与 Node 不在同一台机器，把 `127.0.0.1` 换成实际地址，
-> 并给 `HOST` 设为 `0.0.0.0`。
+| `deploy/licore-website.service` | systemd 单元模板 |
+| `deploy/ecosystem.config.cjs` | PM2 进程配置模板 |
 
 ---
 
-## 五、SEO 实现清单
+## 六、SEO 实现清单
 
 | 项目 | 实现位置 | 说明 |
 | --- | --- | --- |
@@ -364,7 +218,7 @@ server {
 | `hreflang` | `app/app.vue` | 单语言站点，声明 `zh-CN` |
 | 结构化数据 | 首页 / 更新日志 / 下载 / 关于 | `SoftwareApplication`、`WebSite`、`ItemList`、`BreadcrumbList`、`TechArticle`、`AboutPage` |
 | sitemap | `@nuxtjs/sitemap` | 自动包含全部 5 个页面 |
-| robots.txt | `public/robots.txt` | 允许抓取，屏蔽 `/api/`，指向 sitemap |
+| robots.txt | `public/robots.txt` | 允许抓取，屏蔽 `/api/` 与 `/admin`，指向 sitemap |
 | 语义化 HTML | 全部页面 | `header` / `nav` / `main` / `section` / `article` / `time` / `dl` |
 | 无障碍 | 全部页面 | 跳转链接、`aria-label`、`aria-current`、`aria-expanded`、focus 样式 |
 | 404 处理 | `app/error.vue` | 返回真实 404 状态码 + `noindex` |
@@ -374,7 +228,7 @@ server {
 
 ---
 
-## 六、目录结构
+## 七、目录结构
 
 ```
 .
@@ -396,14 +250,14 @@ server {
 │       ├── download.vue        # 下载（自动适配二进制 / 源码）
 │       ├── docs.vue            # 使用文档
 │       ├── about.vue           # 关于
-│       └── admin.vue           # 后台管理面板（登录 + 状态 + 缓存管理）
+│       └── admin.vue           # 后台管理面板
 ├── server/
 │   ├── api/                    # JSON 接口
-│   │   ├── changelog.get.ts    # GET /api/changelog?limit=5
-│   │   ├── releases.get.ts     # GET /api/releases
-│   │   ├── repo.get.ts         # GET /api/repo
-│   │   ├── commits.get.ts      # GET /api/commits?limit=20
-│   │   ├── status.get.ts       # GET /api/status（公开健康检查）
+│   │   ├── changelog.get.ts
+│   │   ├── releases.get.ts
+│   │   ├── repo.get.ts
+│   │   ├── commits.get.ts
+│   │   ├── status.get.ts       # 公开健康检查
 │   │   └── admin/              # 后台接口（全部需登录）
 │   │       ├── login.post.ts
 │   │       ├── logout.post.ts
@@ -416,38 +270,24 @@ server {
 │       └── auth.ts             # 后台认证（HMAC 签名会话 cookie）
 ├── public/                     # logo、favicon、og.svg、robots.txt、manifest
 ├── licore-site.toml            # 站点配置文件（TOML）
-├── MAINTENANCE.md              # 给 AI 代理的维护手册（内容同步工作流）
-├── DEPLOY.md                   # 部署指南
 ├── deploy/
+│   ├── deploy-pm2.sh           # PM2 一键部署/更新脚本（推荐）
 │   ├── install.sh              # 服务器端一键安装脚本
 │   ├── licore-website.service  # systemd 单元模板
-│   └── ecosystem.config.cjs    # PM2 进程配置
-├── .github/
-│   └── workflows/
-│       └── ci.yml              # 类型检查 + 构建 + 冒烟测试 + 鉴权断言
+│   └── ecosystem.config.cjs    # PM2 进程配置模板
+├── .github/workflows/ci.yml    # 类型检查 + 构建 + 冒烟测试 + 鉴权断言
 ├── nuxt.config.ts
 └── package.json
 ```
 
 ---
 
-## 七、运维与排查
+## 八、运维与排查
 
 ### 健康检查
 
 ```bash
 curl http://127.0.0.1:3000/api/status
-```
-
-返回上游可达性、各缓存条目的年龄与 TTL、以及是否配置了 Token：
-
-```json
-{
-  "ok": true,
-  "upstream": { "reachable": true, "repo": "LiStudioorg/licore", "latencyMs": 0 },
-  "tokenConfigured": false,
-  "cache": { "entries": [{ "key": "releases", "ageSeconds": 6, "ttlSeconds": 600, "fresh": true }] }
-}
 ```
 
 ### 常见问题
@@ -458,42 +298,36 @@ curl http://127.0.0.1:3000/api/status
 | `/api/status` 返回 503 | 上游不可达且**无**历史缓存。检查服务器能否访问 `api.github.com` |
 | 上游可达但页面很久不变 | 大概率是匿名配额耗尽（60 次/小时）。配置 `GITHUB_TOKEN` |
 | sitemap 里是 `127.0.0.1` | 生产环境请设置 `NUXT_PUBLIC_SITE_URL`，并确认 Nginx 传了 `Host` 头 |
-| 下载页没有二进制 | 上游确实没有 Release 资产，站点已自动回退为源码包。创建 Release 后会自动切换 |
+| 下载页没有二进制 | 上游确实没有 Release 资产，站点已自动回退为源码包 |
+| `/admin` 登录不上 | 配置文件改了但没重启服务；或会话过期（默认 12 小时） |
+| 更新后页面还是旧内容 | `current` 软链没切到新目录。`readlink /opt/licore-website/current` 确认 |
 
 ### 数据缓存时长调整
 
 发行数据默认 **5 分钟**刷新。改 `server/utils/github.ts` 里的 `TTL` 对象即可，
-也可以直接用环境变量把所有 TTL 统一覆盖（本地调试很有用）：
+也可以用环境变量统一覆盖（本地调试很有用）：
 
 ```bash
-# 所有资源缓存 5 秒，改动上游后立刻能看到效果
 GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 ```
 
-页面上的"服务端缓存 N 分钟"文案、以及 API 的 `cache-control` 头
-都直接读取 `TTL.releases`，改一处即全局生效，不会出现文案与配置不一致。
-
 ---
 
-## 八、内容维护
-
-官网的**文档类内容**（首页特性卡、文档页命令表、关于页描述）是手写的，
-会随上游 [LiStudioorg/licore](https://github.com/LiStudioorg/licore) 演进变旧。
+## 九、内容维护
 
 仓库提供 **[MAINTENANCE.md](./MAINTENANCE.md)** —— 一份**写给 AI 代理的操作手册**。
 你只需对 AI 说一句"按 MAINTENANCE.md 同步一下上游内容"，它就会：
 
 1. 从上游拉取 README、提交记录、tag
-2. 按文档里的解析规则比对差异（特性列表 / 命令表 / 技术细节）
+2. 按文档里的解析规则比对差异
 3. 只改该改的位置，并跑类型检查 + 构建 + 冒烟测试
 4. 如实报告改了什么、没改什么、哪些无法确认
 
-> **版本号与下载链接不在维护范围内** —— 那部分由站点运行时自动从 GitHub 聚合
-> （每 5 分钟刷新），永远是最新的，不需要人工介入。
+> **版本号与下载链接不在维护范围内** —— 那部分由站点运行时自动从 GitHub 聚合，永远是最新的。
 
 ---
 
-## 九、技术栈
+## 十、技术栈
 
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
@@ -508,7 +342,7 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 
 ---
 
-## 十、许可
+## 十一、许可
 
 本站为 LiCore 项目的展示站点。LiCore 本身以 **AGPL-3.0-only** 分发，
 版权归 LiStudioorg 所有。
