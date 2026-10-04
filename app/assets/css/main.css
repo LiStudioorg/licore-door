@@ -1,9 +1,27 @@
 /**
  * 全局样式入口。
- * fuxsto-design 自带全部组件样式与 @theme 指令，消费方只需要这两行 + 自己的页面样式。
+ *
+ * 【为什么不再 `@import 'fuxsto-design/styles'`】
+ * 那个文件是库**预先编译好的** 112 KB 产物，里面把整库所有组件的工具类
+ * 都固化了。本站在全站只用到 6 个组件（Button / Card / Badge / Chip /
+ * Skeleton / Input），整份引入意味着 78 KB（约 55%）的 CSS 从来没被任何
+ * 页面用到，却**在关键渲染路径上阻塞首屏**（实测 entry.css 143 KB）。
+ *
+ * 现在改成两条更精确的路径：
+ *   1. `./fuxsto-theme.css` —— 只取库的 Tailwind **编译期指令**
+ *      （@theme 令牌 + @custom-variant dark），共 1.4 KB。
+ *      它们让 `bg-primary` 这类工具类和 `dark:` 前缀仍然可用。
+ *   2. 下面的 `@source` —— 让 Tailwind 去扫描库的组件产物，
+ *      按实际用到的类名**现场生成**工具类，而不是整份搬运。
+ *
+ * 两者合起来，同样一套类名，产物体积大幅下降且与用量成正比。
  */
 @import 'tailwindcss';
-@import 'fuxsto-design/styles';
+@import './fuxsto-theme.css';
+
+/* 扫描 fuxsto-design 的组件产物，按需生成它用到的那部分工具类。
+   缺了这行，库组件的样式会整片消失（按钮/卡片变成无样式）。 */
+@source '../../../node_modules/fuxsto-design/dist';
 
 /* ------------------------------------------------------------------ *
  * 站点专属设计令牌（在库令牌之上叠加，不改库本体）

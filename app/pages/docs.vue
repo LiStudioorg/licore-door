@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Card, Badge, Button } from 'fuxsto-design'
+import { Card, Badge } from 'fuxsto-design'
 import {
   BookOpen,
   Terminal,

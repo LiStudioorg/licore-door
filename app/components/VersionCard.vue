@@ -3,7 +3,7 @@
  * 变更明细由服务端预先聚合（Release 正文 或 tag 区间提交合成）。
  */
 <script setup lang="ts">
-import { Chip, Badge, Button } from 'fuxsto-design'
+import { Chip, Badge } from 'fuxsto-design'
 import {
   Download,
   ExternalLink,

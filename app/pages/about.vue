@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Card, Button } from 'fuxsto-design'
+import { Card } from 'fuxsto-design'
 import {
   Github,
   ExternalLink,

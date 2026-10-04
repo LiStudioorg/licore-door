@@ -3,7 +3,6 @@
  */
 <script setup lang="ts">
 import { Menu as MenuIcon, X, Github, Moon, Sun, Download } from 'lucide-vue-next'
-import { Button } from 'fuxsto-design'
 import { navLinks, repo, site } from '~/config/site'
 
 const route = useRoute()
