@@ -103,43 +103,86 @@ pm2 -v    # 应输出 5.x
 
 **优点**：一条命令完成部署、更新、回滚。不需要在服务器上构建，拿到产物即可。
 
-### 3.1 获取构建产物
+### 3.1 获取构建产物并部署
 
 CI 会在每次 `main` 分支校验通过后**自动构建并发行**（打 tag + 发布 Release），
-产物随 Release 一起发布，**不需要在本地构建**：
+产物随 Release 一起发布。服务器上**一条命令**即可拉取最新版并部署：
 
 ```bash
-# 在服务器上直接下载最新 Release 的产物
-curl -fL -o licore-website-build.tar.gz \
-  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
+# 首次：把脚本拷到服务器（之后就不用再管了）
+scp deploy/deploy-latest.sh user@server:~/
+
+# SSH 到服务器后，一条命令完成下载 + 部署
+bash ~/deploy-latest.sh --site-url https://licore.z321.cc.cd
 ```
 
-也可以打开仓库的 [Releases 页面](https://github.com/LiStudioorg/licore-door/releases)
+`deploy-latest.sh` 会自动：
+1. 从 GitHub 下载最新 Release 的产物（私有仓库自动带上鉴权）
+2. 校验产物完整性
+3. 交给 `deploy-pm2.sh` 完成发布
+
+> 若同目录没有 `deploy-pm2.sh`，它会自动从仓库拉一份下来 ——
+> 所以只拷 `deploy-latest.sh` 一个文件就够了。
+
+常用变体：
+
+```bash
+bash ~/deploy-latest.sh --list          # 列出发行版，不部署
+bash ~/deploy-latest.sh --tag v1.0.3    # 部署指定版本
+bash ~/deploy-latest.sh --dry-run       # 只下载验结构，不发布
+bash ~/deploy-latest.sh --rollback      # 回滚到上一个已部署版本
+```
+
+其余参数（`--port` / `--host` / `--site-url` / `--app-dir` / `--keep` / `--no-pm2`）
+原样透传给 `deploy-pm2.sh`。
+
+#### 私有仓库的鉴权
+
+本仓库是私有的，下载 Release 需要凭据。脚本会按顺序自动查找：
+
+1. 环境变量 `GITHUB_TOKEN` / `GH_TOKEN`
+2. `--token` 参数
+3. `~/.git-credentials` 里 `github.com` 的 token
+4. 已部署的 `/opt/licore-website/ecosystem.config.cjs` 里的 `GITHUB_TOKEN`
+
+> 第 4 条意味着：**首次部署后，后续更新无需再提供任何凭据**。
+
+#### 手动下载（不想用脚本时）
+
+```bash
+curl -fL -H "Authorization: Bearer $GITHUB_TOKEN" -o build.tar.gz \
+  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
+bash deploy-pm2.sh --src build.tar.gz
+```
+
+也可打开仓库的 [Releases 页面](https://github.com/LiStudioorg/licore-door/releases)
 手动下载，或从 Actions 页面下载 `licore-website-build` artifact。
 
 > 如需自己在本地构建（例如改了代码但还没推送）：
 > ```bash
 > npm ci && npm run build
-> tar -czf licore-website-build.tar.gz .output package.json deploy/deploy-pm2.sh
+> tar -czf licore-website-build.tar.gz .output package.json \
+>   deploy/deploy-pm2.sh deploy/deploy-latest.sh
 > ```
 > 注意包内要保留 `.output/` 顶层目录，部署脚本靠它定位产物。
 
-### 3.2 把产物传到服务器
+### 3.2 把产物传到服务器（手动方式）
+
+用 `deploy-latest.sh` 时**这一步不需要** —— 脚本直接在服务器上下载。
+只有走纯手动流程时才需要：
 
 ```bash
-# 无需传部署脚本 —— 它已包含在 tar.gz 内。
-# 若用的是旧版本产物，再单独传一次脚本即可。
 scp licore-website-build.tar.gz user@server:~/
-scp deploy/deploy-pm2.sh user@server:~/   # 可选
 ```
 
 ### 3.3 首次部署
 
 ```bash
-# SSH 到服务器后，解包拿到部署脚本
-tar -xzf ~/licore-website-build.tar.gz -C ~/licore-deploy --one-top-level
+# 推荐：一条命令
+bash ~/deploy-latest.sh --site-url https://licore.z321.cc.cd
 
-bash ~/licore-deploy/deploy-pm2.sh --src ~/licore-website-build.tar.gz \
+# 或手动指定产物
+bash deploy-pm2.sh --src ~/licore-website-build.tar.gz \
   --site-url https://licore.z321.cc.cd
 ```
 
@@ -191,11 +234,18 @@ token 的生效优先级（从高到低）：
 ### 3.5 后续更新
 
 ```bash
-# 服务器上一条命令搞定：下载最新产物 + 发布
-curl -fL -o /tmp/build.tar.gz \
-  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
-bash ~/licore-deploy/deploy-pm2.sh --src /tmp/build.tar.gz
+# 服务器上一条命令搞定（自动下载最新版 + 发布 + 健康检查）
+bash ~/deploy-latest.sh
 ```
+
+失败会自动回滚到上一版。想手动指定版本：
+
+```bash
+bash ~/deploy-latest.sh --tag v1.0.5
+```
+
+> 更新**不需要**再提供 GitHub 凭据 —— 脚本会复用部署时
+> 写在 `ecosystem.config.cjs` 里的 token。
 
 ### 3.6 常用参数
 
@@ -457,6 +507,13 @@ GITHUB_CACHE_TTL_SECONDS=300
 ## 8. 回滚
 
 如果新版本有问题，切回上一个版本（**秒级完成**）：
+
+```bash
+# PM2 方式：一条命令（自动切软链 + 重载 + 健康检查）
+bash ~/deploy-latest.sh --rollback
+```
+
+手动操作（任何方式都适用）：
 
 ```bash
 cd /opt/licore-website

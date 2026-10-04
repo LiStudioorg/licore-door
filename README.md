@@ -189,12 +189,10 @@ CI 会真的把 `.output` 跑起来并断言：
 git push origin main
 ```
 
-产物随 Release 发布，服务器上一行命令即可更新：
+产物随 Release 发布，服务器上一条命令即可更新：
 
 ```bash
-curl -fL -o /tmp/build.tar.gz \
-  https://github.com/LiStudioorg/licore-door/releases/latest/download/licore-website-build.tar.gz
-bash ~/licore-deploy/deploy-pm2.sh --src /tmp/build.tar.gz
+bash ~/deploy-latest.sh
 ```
 
 > 首次部署请看 [DEPLOY.md](./DEPLOY.md)。
@@ -210,10 +208,15 @@ bash ~/licore-deploy/deploy-pm2.sh --src /tmp/build.tar.gz
 
 | 文件 | 用途 |
 | --- | --- |
-| `deploy/deploy-pm2.sh` | **PM2 一键部署/更新脚本**（推荐，首次部署与后续更新同一条命令） |
+| `deploy/deploy-latest.sh` | **自动拉取最新发行版并部署**（推荐：服务器上一条命令完成更新） |
+| `deploy/deploy-pm2.sh` | PM2 发布脚本（拿到产物后怎么发布；被上面那个脚本调用） |
 | `deploy/install.sh` | 服务器端一键安装：建目录、装 systemd 服务、可选首次构建、可选配 Nginx |
 | `deploy/licore-website.service` | systemd 单元模板 |
 | `deploy/ecosystem.config.cjs` | PM2 进程配置模板 |
+
+> 两者的分工：`deploy-pm2.sh` 负责**怎么发布**（版本化目录 + 原子切软链 +
+> PM2 重载 + 健康检查 + 失败回滚），`deploy-latest.sh` 负责**产物从哪来**
+> （从 GitHub Release 下载）。日常更新只需要跑后者。
 
 ---
 
@@ -282,11 +285,13 @@ bash ~/licore-deploy/deploy-pm2.sh --src /tmp/build.tar.gz
 ├── public/                     # logo、favicon、og.svg、robots.txt、manifest
 ├── licore-site.toml            # 站点配置文件（TOML）
 ├── deploy/
-│   ├── deploy-pm2.sh           # PM2 一键部署/更新脚本（推荐）
+│   ├── deploy-latest.sh        # 拉取最新发行版并部署（推荐）
+│   ├── deploy-pm2.sh           # PM2 发布脚本（被上面那个调用）
 │   ├── install.sh              # 服务器端一键安装脚本
 │   ├── licore-website.service  # systemd 单元模板
 │   └── ecosystem.config.cjs    # PM2 进程配置模板
 ├── .github/workflows/ci.yml    # 类型检查 + 构建 + 冒烟测试 + 鉴权断言
+├── .github/workflows/release.yml  # 打 tag + 发布 Release（附构建产物）
 ├── nuxt.config.ts
 └── package.json
 ```
