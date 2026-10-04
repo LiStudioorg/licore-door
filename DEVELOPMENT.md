@@ -209,6 +209,23 @@ repo = 600
 contributors = 1800
 ```
 
+> ⚠️ `TTL` 的成员是 **getter 而不是普通常量**（`get releases() { … }`）。
+> 历史写法 `releases: seconds(...)` 只有模块导入时求值一次，
+> 后台面板改 TTL 后就不生效了。**不要"顺手简化"回普通属性。**
+> 同理，需要展示给前端或写进响应头的值一律用函数
+> `releaseTtlSeconds()`，不要写成模块级常量。
+
+三个 TTL 的消费方（改语义时都要看一眼）：
+
+| 消费方 | 用途 |
+| --- | --- |
+| `cached(key, ttl, loader)` | 判断进程内缓存是否新鲜 |
+| 各 API 的 `s-maxage` 响应头 | 告诉 Nginx / CDN 缓存多久 |
+| `/api/changelog` 的 `ttlSeconds` | 页面展示「服务端缓存 N 分钟」 |
+
+`tags` / `commits` 跟随 `releases`（上游发版后这两者会一起变），
+只有 `repo` / `contributors` 有独立配置。
+
 ### 4.2 `server/utils/changelog.ts` —— 业务聚合
 
 把 GitHub 的原始数据加工成页面能直接用的结构。
@@ -463,6 +480,30 @@ usePageSeo(
 漏一个就会让某些平台拒绝渲染大图卡片；散在 5 个页面里手写，换图时必然漏改。
 
 其余字段与 `useSeoMeta` 完全一致，直接透传。
+
+### `useDisplayConfig.ts`（展示开关）
+
+面板可改的展示配置，由服务端下发。**页面要用展示开关一律用它**：
+
+```ts
+// 模板 / 渲染里用（computed，SSR 与水合读同一份值）
+const cfg = useDisplayConfig()
+// cfg.display.showActivity / cfg.display.changelogMaxItems
+
+// 在另一个 useAsyncData 的 loader 里用（必须走这个，见 §13.10）
+const cfg = await fetchDisplayConfig()
+```
+
+两条硬性注意：
+
+1. **不要改名叫 `useSiteConfig`** —— 会和 `nuxt-site-config` 自动导入的同名
+   函数冲突，自己的函数根本不执行
+   （见 [§13.9](#139-usesiteconfig-名字被-nuxt-site-config-占用)）。
+2. **跨 `useAsyncData` 一律用 `fetchDisplayConfig()`**
+   （见 [§13.10](#1310-在同一次-setup-里读另一个-useasyncdata-的值会拿到-undefined)）。
+
+取数失败回退到内置默认值（`showActivity = true` 等），展示开关不该让页面挂掉。
+字段清单的**真相在服务端**（`editable-config.ts`），这里只是消费方。
 
 ---
 
@@ -874,6 +915,39 @@ rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png
 
 见 [§5](#5-api-路由)。
 
+### 让一个配置项可以在面板上编辑
+
+**只改一处**：在 `server/utils/editable-config.ts` 的 `FIELD_RULES` 里加一条。
+面板会自动渲染出来，前端一行都不用改。
+
+```ts
+{
+  section: 'display',              // 必须已存在于 SiteConfig 类型与 DEFAULTS
+  field: 'showFooterNote',
+  label: '页脚补充说明',            // 面板上的中文标签
+  hint: '显示在页脚版权行下方。',     // 输入框下方的说明
+  type: 'boolean',                 // text | url | number | boolean
+  read: () => siteConfig.display.showFooterNote,   // 读当前生效值
+  write: (v) => (v === 'true' ? 'true' : 'false'), // 转 TOML 字面量
+  envVar: 'NUXT_PUBLIC_SHOW_FOOTER_NOTE',          // 可选：被该环境变量覆盖时只读
+  validate: (v) => null,                            // 可选：返回错误字符串表示不通过
+}
+```
+
+配套要做的：
+
+1. 在 `server/utils/config.ts` 的 `SiteConfig` **类型**、`DEFAULTS`、
+   `build()` 的 `pick*` 调用、`reloadConfig()` 的原地赋值里各加一处。
+   **漏掉 `reloadConfig()` 那行会导致改完不生效**（其余字段刷新了，这个没有）。
+2. 页面要用它的话，在 `server/api/site-config.get.ts` 里下发，
+   并在 `useDisplayConfig.ts` 的类型与 `FALLBACK` 里补上。
+
+类型取值对照：`text` → `pickString` / `pickOptionalString`（允许空串），
+`url` → `pickUrl`，`number` → `pickInt`（记得传 `min`），`boolean` → `pickBool`。
+
+> ⚠️ **不要**把 `admin.password` / `admin.username` / `github.token` 加进白名单。
+> 前两个的取舍见 [§9.3](#93-可编辑字段白名单serverutilseditable-configts)，token 已有专用入口。
+
 ### 调整更新日志的分组规则
 
 `server/utils/changelog.ts` 里负责把提交按 Conventional Commits
@@ -1115,16 +1189,32 @@ npm run dev          # 开发服务器
 ### 构建后手动验证
 
 ```bash
-PORT=3000 node .output/server/index.mjs &
+# 端口可能被占（本机 3000/3001 常被其他服务占用），先探一个空闲端口
+PORT=3111 HOST=127.0.0.1 node .output/server/index.mjs &
 
 # 全部页面应 200（上游不可达时也必须 200，页面降级渲染）
 for p in / /changelog /download /docs /about /admin /sitemap.xml /robots.txt; do
-  echo "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000$p)  $p"
+  echo "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3111$p)  $p"
 done
 
 # 后台鉴权底线：未登录必须 401
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/admin/status
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3111/api/admin/status
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:3111/api/admin/config.set \
+  -H 'content-type: application/json' -d '{"patch":{"site.icp":"x"}}'
+
+# 展示配置接口
+curl -s http://127.0.0.1:3111/api/site-config
 ```
+
+> ⚠️ **`npm run build` 之后必须重启这个测试进程**，否则你测的是旧代码
+> （旧进程仍在内存里跑着旧 HTML），会得出「修改没生效」的错误结论。
+> 杀掉时注意 `kill $!` 杀的是包装 shell，真正的 node 子进程可能还活着 ——
+> 详见 MAINTENANCE.md 第 6 节。
+
+**改了配置编辑相关代码**（`config.ts` / `editable-config.ts` /
+`config.set.post.ts` / `admin.vue`）时，额外跑一遍 MAINTENANCE.md
+第 5 节的「配置可视化编辑验证清单」—— 重点是**注释必须保留**与
+**非法值必须被拒**，这两点 CI 不覆盖。
 
 ### CI 做什么
 
@@ -1132,9 +1222,17 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/admin/status
 
 1. `npm run typecheck`
 2. `npm run build`
-3. 启动产物，断言 8 条路由 **200**
-4. 断言后台未登录访问为 **401**（鉴权被改坏必须让 CI 变红）
-5. 断言 5 个 SEO 标签存在
+3. 启动产物，断言 **8 条路由 200**
+   （`/` `/changelog` `/download` `/docs` `/about` `/admin` `/sitemap.xml` `/robots.txt`）
+4. 断言后台未登录访问为 **401**：`/api/admin/status` 与
+   `/api/admin/config.set`（未登录竟能写配置是重大事故，必须让 CI 变红）
+5. 断言 **错误密码登录为 401**
+6. 断言 `/api/site-config` 为 **200**，且响应里**含** `showActivity` /
+   `changelogMaxItems`、**不含** `password` / `token` / `username`
+7. 断言 5 个 SEO 标签存在
+
+> 第 6 条的两个方向都要断言：少了字段 → 前端拿不到开关（功能坏）；
+> 多了敏感字段 → 公开接口泄露配置。只测其中一边都拦不住问题。
 
 ### 提交前自查清单
 

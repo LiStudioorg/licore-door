@@ -104,6 +104,15 @@ jobs:
             FAIL=1
           fi
 
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${TEST_URL}/api/admin/config.set" \
+            -H 'content-type: application/json' -d '{"patch":{"site.icp":"x"}}')
+          if [ "$CODE" = "401" ]; then
+            echo "  ✓ /api/admin/config.set 未登录 → ${CODE}"
+          else
+            echo "  ✗ /api/admin/config.set 未登录返回 ${CODE}，应为 401（未登录竟可写配置！）"
+            FAIL=1
+          fi
+
           CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${TEST_URL}/api/admin/login" \
             -H 'content-type: application/json' -d '{"username":"admin","password":"definitely-wrong"}')
           if [ "$CODE" = "401" ]; then
@@ -112,6 +121,37 @@ jobs:
             echo "  ✗ 错误密码登录返回 ${CODE}，应为 401（鉴权失效！）"
             FAIL=1
           fi
+
+          # 展示配置接口必须可用，且**不得泄露敏感字段**。
+          # 前端页面靠它拿可编辑的展示开关，它挂掉会让首页/更新日志页 500。
+          echo "检查 /api/site-config…"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "${TEST_URL}/api/site-config")
+          if [ "$CODE" = "200" ]; then
+            echo "  ✓ /api/site-config → ${CODE}"
+          else
+            echo "  ✗ /api/site-config 返回 ${CODE}，应为 200"
+            FAIL=1
+          fi
+
+          curl -s "${TEST_URL}/api/site-config" -o /tmp/site-config.json
+          for needle in 'showActivity' 'changelogMaxItems'; do
+            if grep -q "$needle" /tmp/site-config.json; then
+              echo "  ✓ 含 ${needle}"
+            else
+              echo "  ✗ 缺少 ${needle}"
+              FAIL=1
+            fi
+          done
+          # 这三个字段绝不能出现在公开响应里
+          for needle in 'password' 'token' 'username'; do
+            if grep -q "$needle" /tmp/site-config.json; then
+              echo "  ✗ /api/site-config 泄露了 ${needle}"
+              FAIL=1
+            else
+              echo "  ✓ 未泄露 ${needle}"
+            fi
+          done
+          rm -f /tmp/site-config.json
 
           # 关键 SEO 标签必须存在。
           # 注意：这里刻意用临时文件而不是 `echo "$HTML" | grep -q`。
