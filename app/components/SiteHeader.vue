@@ -88,10 +88,10 @@ watch(() => route.path, () => (mobileOpen.value = false))
           <Github class="size-4" />
         </a>
 
-        <Button as="a" href="/download" size="sm" class="hidden sm:inline-flex">
+        <LinkButton href="/download" size="sm" class="hidden sm:inline-flex">
           <Download class="mr-1.5 size-3.5" />
           下载
-        </Button>
+        </LinkButton>
 
         <!-- 移动端菜单按钮 -->
         <button

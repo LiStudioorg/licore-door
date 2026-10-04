@@ -530,8 +530,7 @@ licore boot disable    # 取消自启</code></pre>
             </Card>
 
             <div class="mt-5 flex flex-wrap gap-3">
-              <Button
-                as="a"
+              <LinkButton
                 :href="`${repo.url}/blob/main/README.md`"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -539,11 +538,11 @@ licore boot disable    # 取消自启</code></pre>
               >
                 上游 README
                 <ExternalLink class="ml-1.5 size-3.5" />
-              </Button>
-              <Button as="a" href="/changelog" variant="ghost">
+              </LinkButton>
+              <LinkButton href="/changelog" variant="ghost">
                 查看更新日志
                 <ArrowRight class="ml-1.5 size-3.5" />
-              </Button>
+              </LinkButton>
             </div>
           </section>
         </div>

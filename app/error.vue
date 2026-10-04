@@ -32,15 +32,15 @@ useSeoMeta({
         <p class="mt-3 text-sm leading-6 text-muted-foreground">{{ detail }}</p>
 
         <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <Button as="a" href="/" variant="primary">
+          <LinkButton href="/" variant="primary">
             <Home class="mr-1.5 size-4" />
             返回首页
-          </Button>
+          </LinkButton>
           <Button variant="outline" @click="$router.back()">
             <RotateCw class="mr-1.5 size-4" />
             重新加载
           </Button>
-          <Button as="a" :href="`${site.url}/download`" variant="ghost">前往下载页</Button>
+          <LinkButton :href="`${site.url}/download`" variant="ghost">前往下载页</LinkButton>
         </div>
 
         <p class="mt-8 text-xs text-muted-foreground">
