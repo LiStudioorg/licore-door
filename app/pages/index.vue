@@ -74,30 +74,54 @@ const description = latest
   ? `LiCore — 用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发、运行时内存目标 10–20 MiB、自研 .licore 镜像格式。最新版本 ${latest.version}${latest.date ? `（${formatDate(latest.date)} 发布）` : ''}，更新日志与下载链接自动同步自 GitHub。`
   : site.description
 
-useSeoMeta({
-  title,
-  description,
-  ogTitle: `${site.name} — 轻量级容器引擎`,
-  ogDescription: description,
-  ogUrl: site.url,
-  ogImage: `${site.url}/og.svg`,
-  twitterTitle: `${site.name} — 轻量级容器引擎`,
-  twitterDescription: description,
-  twitterImage: `${site.url}/og.svg`,
-})
+usePageSeo(
+  {
+    title,
+    description,
+    ogTitle: `${site.name} — 轻量级容器引擎`,
+    ogDescription: description,
+    ogUrl: site.url,
+    twitterTitle: `${site.name} — 轻量级容器引擎`,
+    twitterDescription: description,
+  },
+  { path: '/' },
+)
 
 useHead({
   // 首页标题已是完整站名，不再套用 "xxx | LiCore"
   titleTemplate: () => title,
-  link: [{ rel: 'canonical', href: site.url }],
   script: [
     {
       type: 'application/ld+json',
       innerHTML: JSON.stringify({
         '@context': 'https://schema.org',
         '@graph': [
+          /**
+           * 用 @id 把各节点串成一张图，而不是一堆互不相干的孤立对象。
+           * 搜索引擎借此理解「这是同一实体的不同侧面」，
+           * 也是 Google 富结果（软件下载卡片）识别 publisher 的前提。
+           */
+          {
+            '@type': 'Organization',
+            '@id': `${site.url}/#organization`,
+            name: site.author,
+            url: repo.url,
+            logo: `${site.url}/logo.svg`,
+            sameAs: [repo.url],
+          },
+          {
+            '@type': 'WebSite',
+            '@id': `${site.url}/#website`,
+            name: `${site.name} 官网`,
+            alternateName: `${site.name} — ${site.tagline}`,
+            url: site.url,
+            inLanguage: 'zh-CN',
+            description: site.description,
+            publisher: { '@id': `${site.url}/#organization` },
+          },
           {
             '@type': 'SoftwareApplication',
+            '@id': `${site.url}/#software`,
             name: site.name,
             alternateName: 'Boxli',
             applicationCategory: 'DeveloperApplication',
@@ -106,15 +130,20 @@ useHead({
             description: site.description,
             url: site.url,
             downloadUrl: `${site.url}/download`,
+            installUrl: `${site.url}/download`,
             softwareVersion: latest?.versionNumber ?? undefined,
             datePublished: latest?.date || undefined,
+            releaseNotes: `${site.url}/changelog`,
             license: `https://www.gnu.org/licenses/agpl-3.0.html`,
             programmingLanguage: 'Go',
-            author: { '@type': 'Organization', name: site.author, url: repo.url },
+            isAccessibleForFree: true,
+            author: { '@id': `${site.url}/#organization` },
+            publisher: { '@id': `${site.url}/#organization` },
+            // 关键词帮助搜索引擎建立主题关联，与 site.keywords 保持同源
+            keywords: site.keywords.join(', '),
             offers: { '@type': 'Offer', price: '0', priceCurrency: 'CNY' },
             ...(meta
               ? {
-                  aggregateRating: undefined,
                   interactionStatistic: {
                     '@type': 'InteractionCounter',
                     interactionType: 'https://schema.org/LikeAction',
@@ -122,13 +151,6 @@ useHead({
                   },
                 }
               : {}),
-          },
-          {
-            '@type': 'WebSite',
-            name: `${site.name} 官网`,
-            url: site.url,
-            inLanguage: 'zh-CN',
-            description: site.description,
           },
         ],
       }),

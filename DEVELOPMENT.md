@@ -109,7 +109,8 @@ app/                          # 前端（会被打进客户端 bundle）
 │   └── VersionCard.vue       # 版本卡片（含内置 markdown 渲染器）
 ├── composables/
 │   ├── useFormat.ts          # 字节/日期/相对时间/数字格式化
-│   └── useTheme.ts           # 明暗主题（localStorage + prefers-color-scheme）
+│   ├── useTheme.ts           # 明暗主题（localStorage + prefers-color-scheme）
+│   └── usePageSeo.ts         # ★ 页面 SEO 统一入口（补全分享图字段）
 ├── config/site.ts            # ★ 站点文案常量（不依赖服务端）
 └── pages/
     ├── index.vue             # 首页
@@ -430,6 +431,31 @@ const { isDark, init, toggle, apply } = useTheme()
 `app.vue` 在 head 内联脚本里**尽早**调用 `init()` 以避免首屏闪烁。
 模板里需要直接绑事件时可用导出的兜底函数 `toggleTheme()`。
 
+### `usePageSeo.ts`
+
+所有页面的 SEO 统一入口，**新页面一律用它，不要再直接写 `useSeoMeta`**：
+
+```ts
+usePageSeo(
+  {
+    title: '更新日志',
+    description,
+    ogTitle: '…',
+    ogDescription: description,
+    ogUrl: `${site.url}/changelog`,
+    twitterTitle: '…',
+    twitterDescription: description,
+  },
+  { path: '/changelog' },   // 可选：显式声明 canonical
+)
+```
+
+它替页面补全分享图的四个字段（`og:image` 与 `twitter:image` 的
+绝对地址、宽高、alt、type）。这样做的原因是这些字段**必须每页都带全**，
+漏一个就会让某些平台拒绝渲染大图卡片；散在 5 个页面里手写，换图时必然漏改。
+
+其余字段与 `useSeoMeta` 完全一致，直接透传。
+
 ---
 
 ## 8. 后台面板与鉴权
@@ -723,6 +749,31 @@ html.replace(/\n{2,}/g, '</p><p>').replace(/^(?!<[huop])/gm, '<p>')
 `token.set.post.ts` → 路由 `/api/admin/token.set`，方法 POST。
 写成 `token.set.ts` 会变成 GET + `method: undefined`，POST 过去是 404。
 后缀只能是 `.get` / `.post` / `.put` / `.delete` / `.patch`。
+
+### 13.7.1 分享图不能用 SVG
+
+`og:image` / `twitter:image` 曾全部指向 `/og.svg`。**SVG 不被任何主流社交
+抓取器支持** —— Facebook、X、LinkedIn、微信、Slack、Discord 拿到 SVG 会直接
+放弃渲染大图卡片，分享出去退化成一条纯文本链接。
+
+现已改为 `/og.png`（1200×630，OG 推荐尺寸），由 `og.svg` 栅格化而来：
+
+```bash
+rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png
+```
+
+**注意两个细节**：
+
+1. **必须显式指定 CJK 字体**。`og.svg` 里的 `font-family` 原本是
+   `ui-sans-serif,system-ui,sans-serif`，在没有中文默认字体的构建机上会
+   fallback 到 DejaVu（无中文字形），中文渲染成豆腐块。栅格化时要把
+   `Noto Sans CJK SC` 加进 fallback 链。
+2. **改了 `og.svg` 必须重新生成 `og.png`**，两者不会自动同步。
+
+另外 `og:image:width` / `og:image:height` / `og:image:alt` / `og:image:type`
+四个字段必须带全：部分平台拿不到宽高会拒绝渲染大图卡片或延迟抓取。
+这四项目前由 `app/composables/usePageSeo.ts` 统一补全，页面不再各写一遍
+（历史上有 5 个页面各自手写，换图时很容易漏改其中一两个）。
 
 ### 13.8 GitHub Token 前缀写错，导致后台永远保存不上
 

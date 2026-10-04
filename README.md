@@ -238,8 +238,8 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 | `<title>` 模板 | `app/app.vue` | 子页面自动拼 `｜ LiCore`，首页用绝对标题 |
 | `meta description` | 各页面 `useSeoMeta` | 每页独立撰写，且**动态包含最新版本号** |
 | `canonical` | `app/app.vue` + 各页 | 指向 `http://licore.z321.cc.cd/...` |
-| Open Graph | 各页 `useSeoMeta` | `og:title` / `og:description` / `og:url` / `og:image` |
-| Twitter Card | 各页 `useSeoMeta` | `summary_large_image` + `/og.svg` |
+| Open Graph | 各页 `usePageSeo` | `og:title` / `og:description` / `og:url` + 分享图（含宽高、alt、type） |
+| Twitter Card | 各页 `usePageSeo` | `summary_large_image` + `/og.png`（1200×630） |
 | `hreflang` | `app/app.vue` | 单语言站点，声明 `zh-CN` |
 | 结构化数据 | 首页 / 更新日志 / 下载 / 关于 | `SoftwareApplication`、`WebSite`、`ItemList`、`BreadcrumbList`、`TechArticle`、`AboutPage` |
 | sitemap | `@nuxtjs/sitemap` | 自动包含全部 5 个页面 |
@@ -293,7 +293,7 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 │       ├── changelog.ts        # 更新日志与下载项聚合
 │       ├── config.ts           # TOML 配置加载与校验（容错 + 默认值）
 │       └── auth.ts             # 后台认证（HMAC 签名会话 cookie）
-├── public/                     # logo、favicon、og.svg、robots.txt、manifest
+├── public/                     # logo、favicon、og.svg / og.png、robots.txt、manifest
 ├── licore-site.toml            # 站点配置文件（TOML）
 ├── deploy/
 │   ├── bootstrap.sh            # 一条命令部署的入口（curl | bash）

@@ -64,20 +64,20 @@ async function copy(text: string, key: string) {  try {
 const description =
   'LiCore 使用文档：安装与编译、快速开始、完整命令参考、Boxfile 镜像构建、.licore 镜像格式、容器网络、卷管理、Hub 分发、Compose 编排、资源限制与开机自启。'
 
-useSeoMeta({
-  title: '文档',
-  description,
-  ogTitle: 'LiCore 文档',
-  ogDescription: description,
-  ogUrl: `${site.url}/docs`,
-  ogImage: `${site.url}/og.svg`,
-  twitterTitle: 'LiCore 文档',
-  twitterDescription: description,
-  twitterImage: `${site.url}/og.svg`,
-})
+usePageSeo(
+  {
+    title: '文档',
+    description,
+    ogTitle: 'LiCore 文档',
+    ogDescription: description,
+    ogUrl: `${site.url}/docs`,
+    twitterTitle: 'LiCore 文档',
+    twitterDescription: description,
+  },
+  { path: '/docs' },
+)
 
 useHead({
-  link: [{ rel: 'canonical', href: `${site.url}/docs` }],
   script: [
     {
       type: 'application/ld+json',
@@ -99,8 +99,9 @@ useHead({
         description,
         inLanguage: 'zh-CN',
         url: `${site.url}/docs`,
-        author: { '@type': 'Organization', name: site.author },
-        about: { '@type': 'SoftwareApplication', name: site.name },
+        author: { '@id': `${site.url}/#organization` },
+        publisher: { '@id': `${site.url}/#organization` },
+        about: { '@id': `${site.url}/#software` },
       }),
     },
   ],

@@ -133,20 +133,20 @@ const sourceLabel: Record<string, string> = {
 /* ---------------- SEO ---------------- */
 const description = `LiCore 全部版本更新日志，共 ${versions.length} 个版本${latestVersion ? `，最新为 ${latestVersion.version}` : ''}。版本、变更内容与下载链接均由本站服务端自动从 GitHub 仓库拉取并聚合，无需人工维护。`
 
-useSeoMeta({
-  title: '更新日志',
-  description,
-  ogTitle: `LiCore 更新日志 — 全部 ${versions.length} 个版本`,
-  ogDescription: description,
-  ogUrl: `${site.url}/changelog`,
-  ogImage: `${site.url}/og.svg`,
-  twitterTitle: 'LiCore 更新日志',
-  twitterDescription: description,
-  twitterImage: `${site.url}/og.svg`,
-})
+usePageSeo(
+  {
+    title: '更新日志',
+    description,
+    ogTitle: `LiCore 更新日志 — 全部 ${versions.length} 个版本`,
+    ogDescription: description,
+    ogUrl: `${site.url}/changelog`,
+    twitterTitle: 'LiCore 更新日志',
+    twitterDescription: description,
+  },
+  { path: '/changelog' },
+)
 
 useHead({
-  link: [{ rel: 'canonical', href: `${site.url}/changelog` }],
   script: [
     {
       type: 'application/ld+json',

@@ -125,20 +125,20 @@ const description = hasBinaries
   ? `下载 LiCore ${latest?.version} 官方构建产物，支持 ${platforms}。下载链接自动同步自 GitHub Release，同时提供源码编译指引与完整构建矩阵说明。`
   : `下载 LiCore ${latest?.version ?? '最新版'}。上游当前未提供预编译二进制，本页提供官方源码归档下载与本地编译指引（Linux amd64/arm64、Android arm64）。`
 
-useSeoMeta({
-  title: '下载',
-  description,
-  ogTitle: `下载 LiCore ${latest?.version ?? ''}`.trim(),
-  ogDescription: description,
-  ogUrl: `${site.url}/download`,
-  ogImage: `${site.url}/og.svg`,
-  twitterTitle: `下载 LiCore ${latest?.version ?? ''}`.trim(),
-  twitterDescription: description,
-  twitterImage: `${site.url}/og.svg`,
-})
+usePageSeo(
+  {
+    title: '下载',
+    description,
+    ogTitle: `下载 LiCore ${latest?.version ?? ''}`.trim(),
+    ogDescription: description,
+    ogUrl: `${site.url}/download`,
+    twitterTitle: `下载 LiCore ${latest?.version ?? ''}`.trim(),
+    twitterDescription: description,
+  },
+  { path: '/download' },
+)
 
 useHead({
-  link: [{ rel: 'canonical', href: `${site.url}/download` }],
   script: [
     {
       type: 'application/ld+json',

@@ -33,7 +33,25 @@ export const site = {
   lang: 'zh-CN',
   /** 主题色，用于 theme-color meta 与 PWA 场景 */
   themeColor: '#09090b',
+  /**
+   * 社交分享图（Open Graph / Twitter Card）。
+   *
+   * ⚠️ 必须是 **PNG/JPEG**，不能用 SVG：Facebook、X、LinkedIn、微信、Slack
+   * 等抓取器一律不支持 SVG，拿到 SVG 会直接放弃渲染大图卡片（退化成纯文本链接）。
+   * `og.png` 由 `og.svg` 栅格化而来（1200×630，OG 推荐尺寸）：
+   *
+   *   rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png
+   *
+   * 改 `og.svg` 后记得重新生成 `og.png`，否则两者会不一致。
+   */
+  ogImage: '/og.png',
+  ogImageWidth: 1200,
+  ogImageHeight: 630,
+  ogImageAlt: 'LiCore — 用 Go 编写的轻量级容器引擎',
 } as const
+
+/** 分享图的绝对地址（og:image 必须是绝对 URL，相对路径会被抓取器忽略） */
+export const ogImageUrl = `${site.url}${site.ogImage}`
 
 /** 上游 GitHub 仓库坐标 —— 所有动态数据都来自这里 */
 export const repo = {

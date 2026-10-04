@@ -75,20 +75,20 @@ const designGoals = [
 /* ---------------- SEO ---------------- */
 const description = `关于 LiCore：项目定位、设计取舍、更名历史与开源协议。LiCore 是 LiStudioorg 用 Go 编写的轻量级容器引擎，AGPL-3.0 开源，仓库位于 GitHub ${repo.slug}。`
 
-useSeoMeta({
-  title: '关于',
-  description,
-  ogTitle: '关于 LiCore',
-  ogDescription: description,
-  ogUrl: `${site.url}/about`,
-  ogImage: `${site.url}/og.svg`,
-  twitterTitle: '关于 LiCore',
-  twitterDescription: description,
-  twitterImage: `${site.url}/og.svg`,
-})
+usePageSeo(
+  {
+    title: '关于',
+    description,
+    ogTitle: '关于 LiCore',
+    ogDescription: description,
+    ogUrl: `${site.url}/about`,
+    twitterTitle: '关于 LiCore',
+    twitterDescription: description,
+  },
+  { path: '/about' },
+)
 
 useHead({
-  link: [{ rel: 'canonical', href: `${site.url}/about` }],
   script: [
     {
       type: 'application/ld+json',
@@ -109,14 +109,17 @@ useHead({
         name: '关于 LiCore',
         description,
         url: `${site.url}/about`,
+        inLanguage: 'zh-CN',
+        publisher: { '@id': `${site.url}/#organization` },
         mainEntity: {
           '@type': 'SoftwareApplication',
+          '@id': `${site.url}/#software`,
           name: site.name,
           alternateName: 'Boxli',
           applicationCategory: 'DeveloperApplication',
           operatingSystem: 'Linux, Android, macOS, Windows (WSL2)',
           license: 'https://www.gnu.org/licenses/agpl-3.0.html',
-          author: { '@type': 'Organization', name: site.author, url: repo.url },
+          author: { '@id': `${site.url}/#organization` },
         },
       }),
     },
