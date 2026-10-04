@@ -6,7 +6,8 @@
  * 需要完整数据时显式加 ?commits=1。
  */
 import { buildDownloads } from '../utils/changelog'
-import { TTL } from '../utils/github'
+import { RELEASE_TTL_SECONDS } from '../utils/github'
+import { upstreamUnavailable } from '../utils/upstream'
 
 export default defineEventHandler(async (event) => {
 
@@ -14,14 +15,19 @@ export default defineEventHandler(async (event) => {
   setResponseHeader(
     event,
     'cache-control',
-    `public, max-age=60, s-maxage=${Math.round(TTL.releases / 1000)}, stale-while-revalidate=${Math.round((TTL.releases * 2) / 1000)}`,
+    `public, max-age=60, s-maxage=${RELEASE_TTL_SECONDS}, stale-while-revalidate=${RELEASE_TTL_SECONDS * 2}`,
   )
   setResponseHeader(event, 'access-control-allow-origin', '*')
   setResponseHeader(event, 'access-control-allow-methods', 'GET, OPTIONS')
   const query = getQuery(event)
   const withCommits = query.commits === '1' || query.commits === 'true'
 
-  const data = await buildDownloads(event)
+  let data
+  try {
+    data = await buildDownloads(event)
+  } catch (err) {
+    return upstreamUnavailable(event, err)
+  }
   const versions = withCommits
     ? data.versions
     : data.versions.map(({ commits, ...rest }) => ({

@@ -3,10 +3,9 @@
  * 最近提交，首页活动流使用。
  */
 import { getCommits, TTL } from '../utils/github'
+import { upstreamUnavailable } from '../utils/upstream'
 
 export default defineEventHandler(async (event) => {
-
-  // 缓存与跨域：与内部 TTL 缓存配合，避免频繁打上游
   setResponseHeader(
     event,
     'cache-control',
@@ -16,6 +15,13 @@ export default defineEventHandler(async (event) => {
   setResponseHeader(event, 'access-control-allow-methods', 'GET, OPTIONS')
   const query = getQuery(event)
   const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100)
-  const commits = await getCommits(limit, event)
+
+  let commits: Awaited<ReturnType<typeof getCommits>>
+  try {
+    commits = await getCommits(limit, event)
+  } catch (err) {
+    return upstreamUnavailable(event, err)
+  }
+
   return { ok: true, commits, fetchedAt: new Date().toISOString() }
 })

@@ -3,10 +3,9 @@
  * 仓库元信息（star / fork / 语言 / 许可证等），首页统计卡使用。
  */
 import { getContributors, getRepoMeta, TTL } from '../utils/github'
+import { upstreamUnavailable } from '../utils/upstream'
 
 export default defineEventHandler(async (event) => {
-
-  // 缓存与跨域：与内部 TTL 缓存配合，避免频繁打上游
   setResponseHeader(
     event,
     'cache-control',
@@ -14,9 +13,17 @@ export default defineEventHandler(async (event) => {
   )
   setResponseHeader(event, 'access-control-allow-origin', '*')
   setResponseHeader(event, 'access-control-allow-methods', 'GET, OPTIONS')
-  const [repo, contributors] = await Promise.all([
-    getRepoMeta(event),
-    getContributors(event).catch(() => []),
-  ])
+
+  let repo: Awaited<ReturnType<typeof getRepoMeta>>
+  let contributors: Awaited<ReturnType<typeof getContributors>>
+  try {
+    ;[repo, contributors] = await Promise.all([
+      getRepoMeta(event),
+      getContributors(event),
+    ])
+  } catch (err) {
+    return upstreamUnavailable(event, err)
+  }
+
   return { ok: true, repo, contributors, fetchedAt: new Date().toISOString() }
 })
