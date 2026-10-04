@@ -1174,6 +1174,126 @@ const { data } = await useAsyncData('home', async () => {
 > 模板里用 `useDisplayConfig()` 返回的 computed 是安全的（渲染发生在解析之后），
 > 只有「在另一个异步 loader 里读」才有这个坑。
 
+### 13.11 首屏性能：四个已做的优化与它们的护栏
+
+这一节记录**一次成体系的加载速度优化**。改任何相关代码前先读一遍，
+尤其是「不要改回去」的四处 —— 它们都是有意为之。
+
+优化前的实测（本机生产产物）：
+
+| 项 | 优化前 | 优化后 |
+| --- | --- | --- |
+| 首页 HTML | 147,276 B | **101,118 B** |
+| `/download` HTML | 220,169 B | **86,597 B**（−61%） |
+| 全局 CSS | 143,246 B（gzip 21,620 B） | **104,188 B（gzip 15,399 B）** |
+| 首页 SSR payload | 72,681 字符 | **30,024 字符** |
+| `/download` SSR payload | 约 160,000 字符 | **32,204 字符** |
+| `/docs` TTFB | 25 ms（每次 SSR） | **15 ms（构建期预渲染）** |
+
+#### ① CSS 不再整份引入组件库（收益最大）
+
+`app/assets/css/main.css` 里原本是 `@import 'fuxsto-design/styles'`。
+那是库**预先编译好的** 112 KB 产物，把整库所有组件的工具类都固化了；
+而本站全站只用到 6 个组件（Button / Card / Badge / Chip / Skeleton / Input）。
+实测其中 **78 KB（约 55%）从未被任何页面用到**，却在关键渲染路径上阻塞首屏。
+
+现在改成两条更精确的路径：
+
+```css
+@import 'tailwindcss';
+@import './fuxsto-theme.css';              /* 只含库的 @theme 令牌 + dark 变体，1.4 KB */
+@source '../../../node_modules/fuxsto-design/dist';  /* 让 Tailwind 扫描库产物按需生成 */
+```
+
+> ⚠️ **`@source` 的层数是 3 层**（`css/` → `assets/` → `app/` → 项目根）。
+> 实测写错层数时 Tailwind **不报错**，只是静默少生成样式，
+> 表现为按钮/卡片的 `ease-swift`、`h-4`、`z-10` 等类凭空消失。
+> 改这个路径后必须跑 §13.11 末尾的「渲染类覆盖检查」。
+
+`app/assets/css/fuxsto-theme.css` 是从 `node_modules` 的产物里**摘出来的编译期指令**
+（`@theme` 块 + `@custom-variant dark`）。库没有单独发布这个入口，
+所以只能本地留一份。升级 `fuxsto-design` 后如果令牌有变化，需要重新摘一次。
+
+#### ② SSR payload 按页裁剪
+
+首页和 `/download` 曾把**完整的**更新日志数据塞进 SSR payload，
+但真正渲染的字段很少：
+
+- 首页只渲染最新 4 条的 `version`/`date`/`hasBinaries`/`summary`/`commitCount`
+  → 改用 `/api/changelog?limit=4&summary=1`。
+- `/download` 只用到下拉框的 `version`/`date`/`hasBinaries`、两个计数，
+  以及被选中版本的 `downloads`；`changes` 明细一条都不显示。
+  → `buildDownloads()` 返回裁剪后的 `VersionSummary`。
+
+> ⚠️ **不要再把 `buildDownloads()` 改回直接下发 `log.versions`。**
+> 那会让 `/download` 平白多出约 160 KB JSON，而渲染结果完全一样。
+> 将来若要在下载页展示某版本的变更明细，正确做法是**新增按需接口**
+> （如 `/api/changelog?v=...`），而不是把全部明细塞回首屏。
+>
+> `/changelog` 页**不走** `summary=1` 分支 —— 它确实要渲染完整明细。
+
+#### ③ `/docs` 构建期预渲染
+
+`docs.vue` 正文全部写死，没有任何 `useAsyncData` / 配置开关依赖
+（唯一带 `async` 的是剪贴板按钮的处理函数），却每次请求都走一遍 SSR。
+
+现在在 `nuxt.config.ts` 里预渲染：
+
+```ts
+nitro: { prerender: { routes: ['/docs'], crawlLinks: false } }
+```
+
+> 🚫 **只能放 `/docs`。** 其余页面（`/` `/changelog` `/download` `/about`）
+> 的数据实时来自 GitHub，**绝不能**预渲染 —— 那会把版本号固化进构建产物，
+> 上游发新版就得重新部署，直接违背本站「动态 SSR」的核心设计（见 §1）。
+> `/admin` 也不预渲染。
+
+#### ④ 静态资源强缓存
+
+`/_nuxt/**` 带内容哈希，文件名一变 URL 就变，因此可以放心长期强缓存：
+
+```ts
+'/_nuxt/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } }
+```
+
+#### 顺带清掉的死导入
+
+`index.vue` / `download.vue` / `docs.vue` / `about.vue` / `SiteHeader.vue` /
+`VersionCard.vue` 都 `import { Button } from 'fuxsto-design'`，但**一次都没用到**
+（改造时留下的）。已全部删除。跳转按钮一律用 `LinkButton`（见 §13.1）。
+
+#### 改完必须跑的验证
+
+除了 §14 的常规验证，**动了 CSS 引入方式或组件库版本后**，
+务必确认页面渲染出的每个类在产物 CSS 里都有定义：
+
+```bash
+# 起服务后，逐页收集 class 并比对产物 CSS
+python3 - <<'PY'
+import re, urllib.request, collections
+css = open([__import__('glob').glob('.output/public/_nuxt/entry.*.css')[0]][0], encoding='utf8').read()
+tokens = collections.Counter()
+for p in ['/', '/changelog', '/download', '/docs', '/about', '/admin']:
+    h = urllib.request.urlopen('http://127.0.0.1:3111' + p).read().decode('utf8', 'ignore')
+    for m in re.findall(r'class="([^"]*)"', h):
+        for t in m.split():
+            tokens[t] += 1
+def has(cls):
+    esc = ''.join(('\\' + c) if c in ':/.[]()#%,!&*' else c for c in cls)
+    return ('.' + esc) in css
+markers = ('lucide', 'router-link', 'nuxt-link')
+missing = [(t, n) for t, n in tokens.items() if not has(t) and not any(t.startswith(m) for m in markers)]
+print('渲染 class 总数:', len(tokens), '缺失:', len(missing))
+for t, n in sorted(missing, key=lambda x: -x[1])[:20]:
+    print('  ', t, n)
+PY
+# 期望：缺失 0
+```
+
+> 💡 注意上面 `has()` 里的 **CSS 转义**处理。用 `grep "\.hover\:text-foreground"`
+> 这类朴素写法会漏判（CSS 里是 `.hover\:text-foreground`，冒号被转义），
+> 曾有版本因此误报「89 个类缺失」。用脚本里的转义逻辑判断才准。
+
 ---
 
 ## 14. 测试与校验
@@ -1250,6 +1370,10 @@ curl -s http://127.0.0.1:3111/api/site-config
 - [ ] 新增 composable 没有和自动导入的模块**重名**（见 [§13.9](#139-usesiteconfig-名字被-nuxt-site-config-占用)）
 - [ ] 没有在同一个 setup 的另一个 `useAsyncData` loader 里读 `xxx.value`（[§13.10](#1310-在同一次-setup-里读另一个-useasyncdata-的值会拿到-undefined)）
 - [ ] 改配置相关代码后，**重新构建并重启测试进程**再验证（否则测的是旧代码，见 MAINTENANCE §6）
+- [ ] 动了 CSS 引入方式 / 升级 `fuxsto-design` 后，跑过「渲染类覆盖检查」且缺失为 0（[§13.11](#1311-首屏性能四个已做的优化与它们的护栏)）
+- [ ] 没有给动态页面加预渲染（只有 `/docs` 允许，见 [§13.11③](#-docs-构建期预渲染)）
+- [ ] 没有把 `buildDownloads()` 改回下发完整 `log.versions`（[§13.11②](#-ssr-payload-按页裁剪)）
+- [ ] 页面上的 `fuxsto-design` 导入都是**真的用到了**（跳转按钮用 `LinkButton`）
 
 ---
 
@@ -1257,9 +1381,9 @@ curl -s http://127.0.0.1:3111/api/site-config
 
 | 层 | 选型 |
 | --- | --- |
-| 框架 | Nuxt 4（`ssr: true`，纯动态 SSR） |
-| UI | Vue 3.5 + `fuxsto-design` 1.0.5 |
-| 样式 | Tailwind 4（`@tailwindcss/vite`） |
+| 框架 | Nuxt 4（`ssr: true`，纯动态 SSR；仅 `/docs` 预渲染） |
+| UI | Vue 3.5 + `fuxsto-design` 1.0.5（**样式按需生成**，见 §13.11①） |
+| 样式 | Tailwind 4（`@tailwindcss/vite`，`@source` 扫描组件库） |
 | 图标 | `lucide-vue-next` |
 | 服务端 | Nitro（Node 22+） |
 | 配置 | `smol-toml` |
