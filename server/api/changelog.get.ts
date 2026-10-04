@@ -18,6 +18,17 @@ export default defineEventHandler(async (event) => {
   const limit = Math.min(Number(query.limit) || 0, 100)
   /** 默认不下发每个版本内嵌的完整提交数组（体积大且页面已有聚合明细） */
   const withCommits = query.commits === '1' || query.commits === 'true'
+  /**
+   * summary=1：只下发首页那种"版本摘要卡"需要的字段。
+   *
+   * 首页只渲染最新 4 条的 version / date / hasBinaries / summary / commitCount，
+   * 却要为了这 4 条把 17 个版本的 changes 全部塞进 SSR payload
+   * （实测约 45 KB JSON，占首页 HTML 的三分之一）。
+   * 这里按需裁剪，首页用 ?limit=4&summary=1 + limit 拿到刚好够用的数据。
+   *
+   * /changelog 页不走这个分支 —— 它要渲染完整的变更明细。
+   */
+  const summary = query.summary === '1' || query.summary === 'true'
 
   let log: Awaited<ReturnType<typeof buildChangelog>>
   try {
@@ -28,9 +39,19 @@ export default defineEventHandler(async (event) => {
   }
 
   const slice = limit > 0 ? log.versions.slice(0, limit) : log.versions
-  const versions = withCommits
-    ? slice
-    : slice.map(({ commits, ...rest }) => ({ ...rest, commitCount: rest.commitCount || commits.length }))
+  const versions = summary
+    ? slice.map((v) => ({
+        version: v.version,
+        versionNumber: v.versionNumber,
+        date: v.date,
+        isPrerelease: v.isPrerelease,
+        hasBinaries: v.hasBinaries,
+        summary: v.summary,
+        commitCount: v.commitCount || v.commits.length,
+      }))
+    : withCommits
+      ? slice
+      : slice.map(({ commits, ...rest }) => ({ ...rest, commitCount: rest.commitCount || commits.length }))
 
   return {
     ok: true,

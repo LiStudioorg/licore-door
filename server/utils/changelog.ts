@@ -442,16 +442,59 @@ export async function getLatestVersion(event?: H3Event): Promise<VersionEntry | 
 }
 
 /**
+ * 下载页每一条版本记录只需要这几个字段。
+ * 这里刻意不带 `changes` —— 变更明细只在 /changelog 渲染，
+ * 下载页一条都不显示（见下方 buildDownloads 的说明）。
+ */
+export interface VersionSummary {
+  version: string
+  versionNumber: string
+  name: string
+  date: string
+  isPrerelease: boolean
+  /** 该版本是否来自真实 Release（下载页会据此说明"仅 tag 存档"） */
+  hasRelease: boolean
+  hasBinaries: boolean
+  htmlUrl: string
+  summary: string
+  commitCount: number
+  downloads: DownloadItem[]
+}
+
+/**
  * 汇总所有可下载项，去重后返回（下载页用）。
  * 优先返回最新版本的产物。
+ *
+ * ⚠️ 除 `latest` 外的版本会被裁剪成 `VersionSummary`，**不要在这里改回
+ * 直接下发 `log.versions`**。下载页只用到下拉框的 version/date/hasBinaries、
+ * 两个计数，以及被选中版本的 downloads；完整下发会把 17 个版本的
+ * `changes`（分组提交与 Release 正文）一并塞进 SSR payload，
+ * 实测让 /download 平白多出约 160 KB JSON，而页面渲染结果完全一样。
+ *
+ * 如果将来下载页要展示某个版本的变更明细，正确做法是新增一个
+ * 按需接口（如 /api/changelog?v=...），而不是把全部明细塞回首屏。
  */
 export async function buildDownloads(event?: H3Event) {
   const [log, meta] = await Promise.all([buildChangelog(event), getRepoMeta(event).catch(() => null)])
   const latest = log.versions.find((v) => v.hasBinaries) ?? log.versions[0] ?? null
 
+  const versions: VersionSummary[] = log.versions.map((v) => ({
+    version: v.version,
+    versionNumber: v.versionNumber,
+    name: v.name,
+    date: v.date,
+    isPrerelease: v.isPrerelease,
+    hasRelease: v.hasRelease,
+    hasBinaries: v.hasBinaries,
+    htmlUrl: v.htmlUrl,
+    summary: v.summary,
+    commitCount: v.commitCount || v.commits.length,
+    downloads: v.downloads,
+  }))
+
   return {
     latest,
-    versions: log.versions,
+    versions,
     source: log.source,
     repo: meta,
     fetchedAt: log.fetchedAt,

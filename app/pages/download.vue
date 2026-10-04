@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Card, Badge } from 'fuxsto-design'
+import { Card, Badge } from 'fuxsto-design'
 import {
   Download,
   Terminal,
@@ -15,13 +15,18 @@ import {
   Package,
 } from 'lucide-vue-next'
 import { repo, site, buildMatrix } from '~/config/site'
-import type { ChangelogPayload, VersionEntry } from '~~/server/utils/changelog'
+import type { ChangelogPayload, VersionEntry, VersionSummary } from '~~/server/utils/changelog'
 import type { RepoMeta } from '~~/server/utils/github'
 
-/** /api/downloads 的返回结构（type import 会被擦除，不进客户端 bundle） */
+/**
+ * /api/downloads 的返回结构（type import 会被擦除，不进客户端 bundle）。
+ *
+ * `latest` 字段完整（要渲染下载项与命令）；`versions` 是服务端裁剪过的瘦类型
+ * `VersionSummary` —— 它不带 `changes` 明细，避免把 17 个版本的变更全塞进首屏。
+ */
 interface DownloadsPayload {
   latest: VersionEntry | null
-  versions: VersionEntry[]
+  versions: VersionSummary[]
   source: ChangelogPayload['source']
   repo: RepoMeta | null
   fetchedAt: string

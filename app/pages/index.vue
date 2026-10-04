@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Card, Badge, Skeleton } from 'fuxsto-design'
+import { Card, Badge, Skeleton } from 'fuxsto-design'
 import {
   ArrowRight,
   Download,
@@ -35,9 +35,28 @@ import type { GitHubCommit, RepoMeta } from '~~/server/utils/github'
  * bundle（即使永远不执行），既是体积浪费，也让 Vite 报 externalized 警告。
  * 这里的 type import 会被编译器完全擦除，不产生客户端代码。
  */
+/**
+ * 首页只渲染"最新更新"里的摘要卡，用不上每个版本的完整变更明细。
+ * 服务端 `?limit=4&summary=1` 会裁剪成这个形状（见 server/api/changelog.get.ts）。
+ */
+interface VersionSummary {
+  version: string
+  versionNumber: string
+  date: string
+  isPrerelease: boolean
+  hasBinaries: boolean
+  summary: string
+  commitCount: number
+}
+
+interface HomeChangelog {
+  versions: VersionSummary[]
+  source: ChangelogPayload['source']
+}
+
 interface HomeData {
   meta: RepoMeta | null
-  changelog: ChangelogPayload | null
+  changelog: HomeChangelog | null
   commits: GitHubCommit[]
 }
 
@@ -55,7 +74,8 @@ const { data: homeData } = await useAsyncData<HomeData>('home-data', async () =>
   const runtime = await fetchDisplayConfig()
   const [repoApi, logApi, commitsApi] = await Promise.all([
     $fetch<{ ok: boolean; repo: RepoMeta } | null>('/api/repo').catch(() => null),
-    $fetch<ChangelogPayload | null>('/api/changelog').catch(() => null),
+    // limit + summary：首页只需要最新 4 条的摘要，裁剪后 payload 从 ~45 KB 降到几 KB
+    $fetch<HomeChangelog | null>('/api/changelog?limit=4&summary=1').catch(() => null),
     runtime.display.showActivity
       ? $fetch<{ ok: boolean; commits: GitHubCommit[] } | null>('/api/commits?limit=8').catch(() => null)
       : Promise.resolve(null),
