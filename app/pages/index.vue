@@ -161,7 +161,7 @@ const features = [
   {
     icon: Layers,
     title: '自研镜像格式',
-    desc: '.licore = 分层 gzip tar + 自研 index.json 清单，结构简单、可逐层审计，不掺任何 OCI 兼容包袱。',
+    desc: '.licore = 分层 gzip tar + 自研 index.json 清单，结构简单、可逐层审计。与 OCI 是两套格式，互不兼容。',
   },
   {
     icon: Smartphone,
@@ -176,7 +176,7 @@ const features = [
   {
     icon: Boxes,
     title: '零外部依赖',
-    desc: '不需要 Docker、containerd 或任何 OCI 组件。装一个 licore 就能跑，宿主机保持干净。',
+    desc: '运行时不需要 Docker、containerd 或任何 OCI 组件。装一个 licore 就能跑，宿主机保持干净。',
   },
   {
     icon: ShieldCheck,
@@ -252,7 +252,8 @@ const TYPE_COLORS: Record<string, string> = {
           <p class="mx-auto mt-6 max-w-2xl text-base leading-8 text-muted-foreground sm:text-lg">
             LiCore 常驻内存仅 <strong class="text-foreground">10–20 MiB</strong>，单二进制分发，
             覆盖 Linux / Android / macOS。它拥有自研镜像格式与分发体系，
-            <strong class="text-foreground">不兼容 Docker / OCI</strong>，也不依赖任何外部容器组件。
+            <strong class="text-foreground">运行时不需要 Docker / OCI</strong>，
+            同时支持用 <strong class="text-foreground">licore convert</strong> 把现成 Docker 镜像转成 .licore。
           </p>
 
           <div class="mt-9 flex flex-wrap items-center justify-center gap-3">

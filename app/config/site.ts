@@ -13,7 +13,7 @@ export const site = {
    */
   tagline: '无守护进程 · 单二进制分发 · 完全自研生态',
   description:
-    'LiCore 是一个用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发，覆盖 Linux / Android（有 Root）/ macOS，自研镜像格式 .licore，不依赖 Docker、containerd 或任何 OCI 组件。',
+    'LiCore 是一个用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发，覆盖 Linux / Android（有 Root）/ macOS，自研镜像格式 .licore，运行时不需要 Docker、containerd 或任何 OCI 组件，并支持把现成 Docker 镜像转为 .licore。',
   keywords: [
     'LiCore',
     'licore',

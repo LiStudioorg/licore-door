@@ -364,7 +364,8 @@ git push origin main
 | **端口 3000/3001 都被占用** | 这台机器上 3000 与 3001 都有别的服务在监听。测试前先 `ss -ltn \| grep :3111` 确认空闲，用 3111 之类的高位端口。 |
 | **`pkill -f nuxt` 会杀掉自己** | 该模式会匹配到执行它的 shell 本身。用 `kill %1 2>/dev/null   # 或按 PID kill：pgrep -f "server/index.mjs"` 按端口清理。 |
 | **GitHub 配额** | 匿名 60 次/小时，很容易耗尽。配额为 0 时页面仍返回 200（降级渲染），但 `/api/status` 会报 503。改文案不需要访问 GitHub，不受影响。 |
-| **`.licore` 不是 OCI** | 任何"兼容 Docker/OCI"的表述都是错的，不要写进官网。 |
+| **`.licore` 不是 OCI，但 Docker 镜像可以转换** | 两件事要分清：① **格式/运行时层面互不兼容** —— `.licore` 是自研格式，不能由 Docker 构建或运行，LiCore 运行时也不能直接跑 OCI 镜像，`licore pull` 的 Hub 与 Docker Registry 无关。所以**不要**写"兼容 OCI""Docker 替代品（可直接跑 Docker 镜像）"这类表述。② **但存在一条转换路径** —— `licore convert <docker 镜像>` 会调用本机 `docker export`/`inspect` 把现成 Docker 镜像转成 `.licore`（单向，需本机有 docker CLI）。这是**转换**，不是**兼容**。 |
+| **上游 FAQ 与 convert 冲突** | 上游 `README` 的 FAQ#2 仍写着"不做镜像格式转换"，但同一份 README 的《从 Docker 镜像转换（convert）》章节正是做这件事（`docs/convert.md` 有完整参数表）。**以 convert 章节与 `docs/convert.md` 为准**，FAQ#2 是上游文档没同步。官网文案只描述 convert 的**用途与用法**，不要借它宣称兼容 Docker/OCI 生态。 |
 | **Android 无 Root 不支持** | 这是官方明确立场，描述 Android 支持时不能含糊。 |
 | **历史 tag v0.1.0~v0.6.1 是 Boxli** | 项目 v0.7.0 从 Boxli 更名。描述历史时注意区分，不要把 v0.6.x 说成 LiCore。 |
 | **上游已有 Release 资产** | 上游 `release.yml` 已在产出 Release（v0.8.0 等带二进制）。下载页出现二进制链接是站点自动切换（`mode: release-assets`），不要改代码去"修"它。 |

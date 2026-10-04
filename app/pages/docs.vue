@@ -127,7 +127,8 @@ useHead({
 
         <div class="mt-6 flex flex-wrap gap-2">
           <Badge variant="outline" size="md">命令树可执行 licore --help 查看</Badge>
-          <Badge variant="outline" size="md">不兼容 Docker / OCI</Badge>
+          <Badge variant="outline" size="md">与 Docker / OCI 格式互不兼容</Badge>
+          <Badge variant="outline" size="md">支持 convert 转换 Docker 镜像</Badge>
         </div>
       </div>
     </section>
@@ -558,14 +559,36 @@ licore boot disable    # 取消自启</code></pre>
             >
               <ShieldCheck class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
               <div class="text-sm leading-6">
-                <p class="font-medium">LiCore 不兼容 Docker / OCI</p>
+                <p class="font-medium">LiCore 与 Docker / OCI 是两套互不兼容的格式</p>
                 <p class="mt-1 text-muted-foreground">
-                  镜像格式、分发协议、运行时与网络全部自研。不要尝试把 OCI 镜像转成
-                  <code class="rounded bg-muted px-1 py-0.5 text-xs">.licore</code>，或反向转换——
-                  这类设计提案不会进入 LiCore 仓库。
+                  镜像格式、分发协议、运行时与网络全部自研。
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">.licore</code>
+                  不能由 Docker 构建或运行，LiCore 运行时也不会直接执行 OCI 镜像，
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">licore pull</code>
+                  连接的是自研 Hub，与 Docker Registry 无关。
+                </p>
+                <p class="mt-3 text-muted-foreground">
+                  <strong class="text-foreground">但现成 Docker 镜像可以通过转换拿来用：</strong>
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">licore convert</code>
+                  会调用本机 <code class="rounded bg-muted px-1 py-0.5 text-xs">docker export</code>
+                  导出 rootfs 并重建运行配置，产出一个标准的
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">.licore</code> 单层镜像。
+                  转换是<strong class="text-foreground">单向</strong>的，无法把
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">.licore</code> 转回 Docker 镜像。
                 </p>
               </div>
             </div>
+
+            <div class="mt-4">
+              <pre class="code-block"><code>licore convert alpine:3.20 -o /tmp/alpine.licore   # 单个 → 文件
+licore convert nginx:1.27-alpine --import          # 单个 → 直接导入本地
+licore convert --from-file images.txt --output-dir ./dist/   # 批量
+licore run alpine:3.20 /bin/sh -c 'cat /etc/alpine-release'  # 转换后即可运行</code></pre>
+            </div>
+            <p class="mt-3 text-xs text-muted-foreground">
+              需要本机有可用的 <code class="rounded bg-muted px-1 py-0.5">docker</code> CLI；
+              上游提醒 <code class="rounded bg-muted px-1 py-0.5">HEALTHCHECK</code> 会被静默丢弃。
+            </p>
 
             <Card class="mt-5">
               <h3 class="text-sm font-semibold">项目更名说明</h3>

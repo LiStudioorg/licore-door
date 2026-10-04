@@ -58,7 +58,7 @@ const designGoals = [
   {
     icon: Zap,
     title: '把资源占用压到最低',
-    desc: '常驻内存目标 10–20 MiB 是硬指标，而不是宣传语。为了它，LiCore 放弃了对 OCI 生态的兼容，换取一条没有历史包袱的实现路径。',
+    desc: '常驻内存目标 10–20 MiB 是硬指标，而不是宣传语。为了它，LiCore 没有采用 OCI 镜像体系，换取一条没有历史包袱的实现路径。',
   },
   {
     icon: ShieldCheck,
@@ -162,10 +162,16 @@ useHead({
                 <strong class="text-foreground">10–20 MiB</strong>。
               </p>
               <p>
-                它是单二进制分发的，除可选的
-                <code class="rounded bg-muted px-1.5 py-0.5 text-xs">internal/execns</code>
-                （用于进入容器挂载命名空间）之外全部为纯 Go 实现，
-                不依赖 Docker、containerd 或任何 OCI 组件。
+                它是单二进制分发的，全仓库零 CGO（
+                <code class="rounded bg-muted px-1.5 py-0.5 text-xs">CGO_ENABLED=0</code>），
+                Linux 产物为静态链接，运行时不依赖 Docker、containerd 或任何 OCI 组件。
+              </p>
+              <p>
+                镜像格式与 OCI 互不兼容，但提供一条转换路径：用
+                <code class="rounded bg-muted px-1.5 py-0.5 text-xs">licore convert</code>
+                可以把现成的 Docker 镜像转成
+                <code class="rounded bg-muted px-1.5 py-0.5 text-xs">.licore</code>
+                （单向，需本机有 docker CLI）。
               </p>
             </div>
           </section>
