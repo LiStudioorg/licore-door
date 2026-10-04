@@ -724,6 +724,31 @@ html.replace(/\n{2,}/g, '</p><p>').replace(/^(?!<[huop])/gm, '<p>')
 写成 `token.set.ts` 会变成 GET + `method: undefined`，POST 过去是 404。
 后缀只能是 `.get` / `.post` / `.put` / `.delete` / `.patch`。
 
+### 13.8 GitHub Token 前缀写错，导致后台永远保存不上
+
+`server/api/admin/token.set.post.ts` 里曾有一句：
+
+```ts
+if (raw && !raw.startsWith('gh_')) throw createError({ statusCode: 400, … })
+```
+
+**`gh_` 这个前缀任何真实 token 都不满足。** GitHub 的 token 在第 4 个字符
+才是下划线：`ghp_`（classic PAT）、`github_pat_`（fine-grained PAT）、
+`gho_` / `ghu_` / `ghs_` / `ghr_`。
+
+现象是**后台面板粘贴任何合法 token 都提示"必须以 gh_ 开头"**，
+`licore-runtime-token` 永远写不出来，token 永远不生效。
+
+**教训**：不要断言一个我们无法穷举、且上游会随时新增的格式。
+现在的校验只拦「明显像被截断」的输入（长度 < 20 或含空白/非法字符），
+真正的有效性交给 GitHub —— token 错了 `api.github.com` 会返回 401，
+面板的「上游状态」卡片会如实显示不可达。
+
+> 排查同类问题时注意：`curl` 的 cookie jar 是**按文件名复用**的。
+> 如果复用了别的项目的 jar（例如里面已有 `lipanel_token`），
+> 登录写不进去，后续请求会全部 401，看着像鉴权坏了，其实是测试脚本的问题。
+> 每次都 `rm -f` 一个新 jar 再登录。
+
 ---
 
 ## 14. 测试与校验
