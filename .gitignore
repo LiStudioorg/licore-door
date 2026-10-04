@@ -13,3 +13,6 @@ dist
 # 并通过环境变量指向它，避免误提交：
 #   LICORE_SITE_CONFIG=/opt/licore-website/licore-site.local.toml
 licore-site.local.toml
+
+# 运行时 GitHub Token（后台面板写入，含敏感信息，绝不提交）
+licore-runtime-token

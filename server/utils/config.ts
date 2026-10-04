@@ -20,7 +20,7 @@
  * 客户端一律拿不到配置文件，回退到内置默认值（站点文案用的是
  * `app/config/site.ts`，不受这里影响）。
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync, chmodSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parse as parseToml } from 'smol-toml'
 
@@ -147,6 +147,64 @@ function pickUrl(value: unknown, fallback: string, path: string): string {
     return fallback
   }
   return trimmed
+}
+
+/* ------------------------------------------------------------------ *
+ * 运行时 GitHub Token（后台面板可写入，无需重启）
+ *
+ * 优先级：环境变量 GITHUB_TOKEN/GH_TOKEN > 运行时文件 > TOML [github].token
+ *
+ * 为什么要运行时文件：后台面板写入后立刻生效，不需要重启服务；
+ * 也不要把 token 写进仓库里的 licore-site.toml（会被 git 追踪）。
+ * 文件权限 0600，进程可读写，不提交到版本库。
+ * ------------------------------------------------------------------ */
+
+const RUNTIME_TOKEN_FILE = 'licore-runtime-token'
+
+/** 读运行时 token 文件；文件不存在或为空返回 '' */
+export function readRuntimeToken(): string {
+  if (!IS_SERVER) return ''
+  try {
+    const p = resolve(process.cwd(), RUNTIME_TOKEN_FILE)
+    if (!existsSync(p)) return ''
+    return readFileSync(p, 'utf-8').trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 写入运行时 token。传空字符串表示清除（回退到 env / TOML）。
+ * @returns 实际生效的来源标识
+ */
+export function setRuntimeToken(token: string): { ok: boolean; source: string } {
+  if (!IS_SERVER) return { ok: false, source: '' }
+  const p = resolve(process.cwd(), RUNTIME_TOKEN_FILE)
+  if (token.trim()) {
+    writeFileSync(p, token.trim() + '\n', { encoding: 'utf-8', mode: 0o600 })
+    try { chmodSync(p, 0o600) } catch { /* 某些文件系统不支持 chmod，忽略 */ }
+    return { ok: true, source: 'runtime' }
+  }
+  try { unlinkSync(p) } catch { /* 文件本来就不存在 */ }
+  return { ok: true, source: tokenSourceLabel() }
+}
+
+/** 当前 token 的来源标识，供后台面板展示 */
+export function tokenSourceLabel(): string {
+  if (!IS_SERVER) return 'env'
+  if (process.env.GITHUB_TOKEN || process.env.GH_TOKEN) return 'env'
+  if (readRuntimeToken()) return 'runtime'
+  if (siteConfig.github.token) return 'toml'
+  return 'none'
+}
+
+/**
+ * 获取当前生效的 GitHub Token（优先级：env > runtime 文件 > TOML）。
+ * 供 server/utils/github.ts 的 authHeaders() 调用。
+ */
+export function effectiveGitHubToken(): string {
+  if (!IS_SERVER) return ''
+  return process.env.GITHUB_TOKEN || process.env.GH_TOKEN || readRuntimeToken() || siteConfig.github.token
 }
 
 /* ------------------------------------------------------------------ *

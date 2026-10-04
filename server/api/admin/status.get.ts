@@ -7,7 +7,7 @@
  */
 import { cacheStats, getRepoMeta } from '../../utils/github'
 import { isAuthenticated } from '../../utils/auth'
-import { configPath, configWarnings, siteConfig } from '../../utils/config'
+import { configPath, configWarnings, siteConfig, effectiveGitHubToken, tokenSourceLabel } from '../../utils/config'
 
 export default defineEventHandler(async (event) => {
   if (!siteConfig.admin.enabled) {
@@ -34,9 +34,8 @@ export default defineEventHandler(async (event) => {
     error = (err as Error).message
   }
 
-  const tokenConfigured = Boolean(
-    process.env.GITHUB_TOKEN || process.env.GH_TOKEN || siteConfig.github.token,
-  )
+  const tokenConfigured = Boolean(effectiveGitHubToken())
+  const tokenSource = tokenSourceLabel()
 
   return {
     ok: reachable,
@@ -67,6 +66,7 @@ export default defineEventHandler(async (event) => {
       },
       github: {
         tokenConfigured,
+        tokenSource,
         releasesTtlSeconds: siteConfig.github.releases,
         repoTtlSeconds: siteConfig.github.repo,
         contributorsTtlSeconds: siteConfig.github.contributors,

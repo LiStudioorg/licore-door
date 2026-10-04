@@ -77,6 +77,7 @@ interface AdminStatus {
     }
     github: {
       tokenConfigured: boolean
+      tokenSource: 'env' | 'runtime' | 'toml' | 'none'
       releasesTtlSeconds: number
       repoTtlSeconds: number
       contributorsTtlSeconds: number
@@ -199,6 +200,60 @@ function humanDuration(seconds: number): string {
   if (seconds < 60) return `${seconds} 秒`
   if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`
   return `${(seconds / 3600).toFixed(1)} 小时`
+}
+
+/* ---------------- Token 设置 ---------------- */
+const tokenInput = ref('')
+const tokenBusy = ref(false)
+const tokenFlash = reactive({ text: '', kind: 'ok' as 'ok' | 'err' })
+
+async function saveToken() {
+  if (tokenBusy.value || !tokenInput.value.trim()) return
+  tokenBusy.value = true
+  tokenFlash.text = ''
+  try {
+    const res = await $fetch<{ ok: boolean; message: string }>('/api/admin/token.set', {
+      method: 'POST',
+      body: { token: tokenInput.value.trim() },
+    })
+    tokenFlash.text = res.message
+    tokenFlash.kind = 'ok'
+    tokenInput.value = ''
+    await loadStatus()
+  } catch (err: any) {
+    tokenFlash.text = err?.data?.message || '保存失败'
+    tokenFlash.kind = 'err'
+  } finally {
+    tokenBusy.value = false
+  }
+}
+
+async function clearToken() {
+  if (tokenBusy.value) return
+  tokenBusy.value = true
+  tokenFlash.text = ''
+  try {
+    const res = await $fetch<{ ok: boolean; message: string }>('/api/admin/token.set', {
+      method: 'POST',
+      body: { token: '' },
+    })
+    tokenFlash.text = res.message
+    tokenFlash.kind = 'ok'
+    await loadStatus()
+  } catch (err: any) {
+    tokenFlash.text = err?.data?.message || '清除失败'
+    tokenFlash.kind = 'err'
+  } finally {
+    tokenBusy.value = false
+  }
+}
+
+/** token 来源的中文标签 */
+const TOKEN_SOURCE_LABEL: Record<string, string> = {
+  env: '环境变量',
+  runtime: '面板写入',
+  toml: 'TOML 配置',
+  none: '未配置',
 }
 
 /** 缓存项剩余新鲜时间 */
@@ -399,12 +454,66 @@ onMounted(loadStatus)
         >
           {{ status.upstream.error }}
         </p>
-        <p v-if="!status.config.github.tokenConfigured" class="mt-4 text-xs leading-5 text-muted-foreground">
-          未配置 GitHub Token，正在使用匿名配额（60 次/小时）。高频访问下容易耗尽，
-          建议在 <code class="rounded bg-muted px-1 py-0.5">licore-site.toml</code> 的
-          <code class="rounded bg-muted px-1 py-0.5">[github].token</code> 或环境变量
-          <code class="rounded bg-muted px-1 py-0.5">GITHUB_TOKEN</code> 中配置。
-        </p>
+
+        <!-- Token 设置区 -->
+        <div class="mt-4 rounded-lg border border-border p-4">
+          <h3 class="flex items-center gap-2 text-sm font-semibold">
+            <KeyRound class="size-4 text-primary" aria-hidden="true" />
+            GitHub Token
+            <Badge
+              :variant="status.config.github.tokenSource === 'none' ? 'secondary' : 'primary'"
+              size="sm"
+            >
+              {{ TOKEN_SOURCE_LABEL[status.config.github.tokenSource] ?? status.config.github.tokenSource }}
+            </Badge>
+          </h3>
+
+          <p class="mt-2 text-xs leading-5 text-muted-foreground">
+            优先级：环境变量 &gt; 面板写入（运行时文件）&gt; TOML 配置。
+            面板写入立即生效，无需重启；重启后仍保留（文件不随进程消失）。
+            <br />
+            未配置时走匿名配额（60 次/小时/IP），高频访问容易耗尽。
+          </p>
+
+          <div class="mt-3 flex items-center gap-2">
+            <Input
+              v-model="tokenInput"
+              :type="tokenInput ? 'text' : 'password'"
+              placeholder="ghp_xxxx…"
+              :disabled="tokenBusy"
+              class="flex-1"
+            />
+            <Button
+              variant="primary"
+              size="sm"
+              :icon="CheckCircle2"
+              :loading="tokenBusy && tokenInput.trim().length > 0"
+              :disabled="!tokenInput.trim()"
+              @click="saveToken"
+            >
+              保存
+            </Button>
+            <Button
+              v-if="status.config.github.tokenSource === 'runtime'"
+              variant="ghost"
+              size="sm"
+              :icon="Trash2"
+              :loading="tokenBusy && tokenInput.trim().length === 0"
+              @click="clearToken"
+            >
+              清除
+            </Button>
+          </div>
+
+          <p
+            v-if="tokenFlash.text"
+            class="mt-2 flex items-center gap-1.5 text-xs"
+            :class="tokenFlash.kind === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'"
+          >
+            <component :is="tokenFlash.kind === 'ok' ? CheckCircle2 : AlertTriangle" class="size-3.5" />
+            {{ tokenFlash.text }}
+          </p>
+        </div>
       </Card>
 
       <!-- ---------------- 缓存管理 ---------------- -->

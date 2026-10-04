@@ -11,7 +11,7 @@
  * 注意：本模块只在服务端运行，token 不会进入客户端产物。
  */
 import type { H3Event } from 'h3'
-import { siteConfig } from './config'
+import { siteConfig, effectiveGitHubToken } from './config'
 
 const API = 'https://api.github.com'
 const OWNER = 'LiStudioorg'
@@ -173,8 +173,10 @@ function authHeaders(): Record<string, string> {
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'licore-website',
   }
-  // token 来源：环境变量 GITHUB_TOKEN / GH_TOKEN，或 licore-site.toml 的 [github].token
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || siteConfig.github.token
+  // token 优先级：环境变量 GITHUB_TOKEN/GH_TOKEN > 运行时文件 > TOML [github].token
+  // 用 effectiveGitHubToken() 而非 siteConfig.github.token，这样后台写入的
+  // 运行时 token 无需重启就能生效。
+  const token = effectiveGitHubToken()
   if (token) headers.Authorization = `Bearer ${token}`
   return headers
 }
