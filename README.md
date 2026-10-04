@@ -236,14 +236,15 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 | 项目 | 实现位置 | 说明 |
 | --- | --- | --- |
 | `<title>` 模板 | `app/app.vue` | 子页面自动拼 `｜ LiCore`，首页用绝对标题 |
-| `meta description` | 各页面 `useSeoMeta` | 每页独立撰写，且**动态包含最新版本号** |
-| `canonical` | `app/app.vue` + 各页 | 指向 `http://licore.z321.cc.cd/...` |
+| `meta description` | 各页面 `usePageSeo` | 每页独立撰写，且**动态包含最新版本号** |
+| `canonical` | `app/app.vue` + 各页 | 指向 `http://licore.z321.cc.cd/...`，响应式 |
 | Open Graph | 各页 `usePageSeo` | `og:title` / `og:description` / `og:url` + 分享图（含宽高、alt、type） |
 | Twitter Card | 各页 `usePageSeo` | `summary_large_image` + `/og.png`（1200×630） |
 | `hreflang` | `app/app.vue` | 单语言站点，声明 `zh-CN` |
-| 结构化数据 | 首页 / 更新日志 / 下载 / 关于 | `SoftwareApplication`、`WebSite`、`ItemList`、`BreadcrumbList`、`TechArticle`、`AboutPage` |
-| sitemap | `@nuxtjs/sitemap` | 自动包含全部 5 个页面 |
+| 结构化数据 | `app/app.vue` + 各页 | 全站兜底 `Organization`/`WebSite`，页面用 `@id` 引用并叠加自己的类型 |
+| sitemap | `@nuxtjs/sitemap` | 自动包含全部 5 个页面，含 `lastmod` |
 | robots.txt | `public/robots.txt` | 允许抓取，屏蔽 `/api/` 与 `/admin`，指向 sitemap |
+| 引擎验证 | `public/BingSiteAuth.xml` | Bing Webmaster Tools 站点所有权验证 |
 | 语义化 HTML | 全部页面 | `header` / `nav` / `main` / `section` / `article` / `time` / `dl` |
 | 无障碍 | 全部页面 | 跳转链接、`aria-label`、`aria-current`、`aria-expanded`、focus 样式 |
 | 404 处理 | `app/error.vue` | 返回真实 404 状态码 + `noindex` |
@@ -258,16 +259,18 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 ```
 .
 ├── app/
-│   ├── app.vue                 # 根组件：全局 SEO 模板、主题初始化
+│   ├── app.vue                 # 根组件：全局 SEO 模板、JSON-LD 兜底、主题初始化
 │   ├── error.vue               # 404 / 500 页面
 │   ├── assets/css/main.css     # Tailwind v4 + fuxsto-design 样式入口
 │   ├── components/
 │   │   ├── SiteHeader.vue      # 顶栏导航 + 主题切换
 │   │   ├── SiteFooter.vue      # 页脚
+│   │   ├── LinkButton.vue      # 链接型按钮（跳转必须用它，见 DEVELOPMENT §13.1）
 │   │   └── VersionCard.vue     # 版本条目（更新日志核心组件）
 │   ├── composables/
 │   │   ├── useTheme.ts         # 明暗主题
-│   │   └── useFormat.ts        # 体积 / 日期 / 相对时间格式化
+│   │   ├── useFormat.ts        # 体积 / 日期 / 相对时间格式化
+│   │   └── usePageSeo.ts       # 页面 SEO 统一入口（补全分享图字段）
 │   ├── config/site.ts          # 站点常量：域名、关键词、导航、构建矩阵
 │   └── pages/
 │       ├── index.vue           # 首页
@@ -332,12 +335,26 @@ curl http://127.0.0.1:3000/api/status
 
 ### 数据缓存时长调整
 
-发行数据默认 **5 分钟**刷新。改 `server/utils/github.ts` 里的 `TTL` 对象即可，
-也可以用环境变量统一覆盖（本地调试很有用）：
+发行数据默认 **5 分钟**刷新。缓存时长**不硬编码在代码里**，
+而是读 `licore-site.toml` 的 `[github]` 段：
+
+```toml
+[github]
+releases = 300       # 秒
+repo = 600
+contributors = 1800
+```
+
+改完**重启/重载服务**生效。
+
+本地调试想秒级刷新，用环境变量统一覆盖所有 TTL（不必改配置文件）：
 
 ```bash
 GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 ```
+
+> 不要改 `server/utils/github.ts` 里的 `TTL` 常量 —— 它由配置驱动，
+> 手改会被配置覆盖，属于无效修改。
 
 ---
 

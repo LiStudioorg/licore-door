@@ -417,6 +417,10 @@ git push origin main
 | `app/pages/download.vue` | 下载页 | ❌ 自动适配 |
 | `app/pages/admin.vue` | 后台管理面板 | ❌ 与上游内容无关 |
 | `app/config/site.ts` | 站点元信息（域名、SEO 描述） | ⚠️ 仅 description/tagline |
+| `app/composables/usePageSeo.ts` | 页面 SEO 统一入口（分享图字段） | ❌ 不要动 |
+| `app/app.vue` | 全局 head、canonical、JSON-LD 兜底 | ❌ 不要动 |
+| `public/og.svg` / `public/og.png` | 分享图源文件与产物 | ❌ 与上游内容无关 |
+| `public/BingSiteAuth.xml` | Bing 站点验证 | ❌ 不要动 |
 | `licore-site.toml` | 站点配置文件（TOML） | ❌ 与上游内容无关 |
 | `server/utils/config.ts` | TOML 配置加载与校验 | ❌ 不要动 |
 | `server/utils/auth.ts` | 后台认证（会话 cookie） | ❌ 不要动 |
@@ -425,12 +429,28 @@ git push origin main
 | `server/utils/github.ts` | GitHub 数据层（缓存/TTL） | ❌ 不要动 |
 | `README.md` | 项目说明（给人看） | ⚠️ 功能变化时同步 |
 | `DEPLOY.md` | 部署指南 | ❌ 除非部署方式变了 |
+| `DEVELOPMENT.md` | 开发文档（架构、SEO、踩坑） | ❌ 不要动 |
 | `.github/workflows/ci.yml` | CI（类型检查+构建+冒烟） | ❌ 不要动 |
 | `.github/workflows/release.yml` | 自动发行（打 tag + 发 Release） | ❌ 不要动 |
 
 > **注意**：`server/utils/github.ts` 里的 TTL 现在读的是 `licore-site.toml` 的
 > `[github]` 段（`releases` / `repo` / `contributors`，单位秒），
 > 不再是硬编码的 `minutes(5)`。改缓存时长请改配置文件，不要改代码。
+
+### ⚠️ 改文案时的 SEO 连带影响
+
+你改的是**文案**，但文案会流进 SEO 输出。改 `app/config/site.ts` 的
+`description` 或页面的 `description` 时注意：
+
+- **不要改成裸 `useSeoMeta`**。页面必须用 `usePageSeo`，它会补全
+  `og:image` 的绝对地址与宽高/alt/type。改成裸 `useSeoMeta` 会让
+  社交分享卡片静默退化（不报错，极难发现）。
+- **分享图只能是 PNG**，不能是 SVG —— 详见
+  [DEVELOPMENT.md §13.7.1](./DEVELOPMENT.md)。
+- **description 中文控制在 75~80 字**。Google 按像素宽度截断，
+  中文约为英文 2 倍宽，155 字符的英文经验值不能直接套用。
+- 页面 JSON-LD 通过 `@id` 引用 `#organization` / `#software` 锚点。
+  改文案可以，**动结构不可以**（见第 5 节硬性约束第 4 条）。
 
 ---
 

@@ -480,6 +480,25 @@ curl -s http://licore.z321.cc.cd/sitemap.xml | head -20
 - [ ] `/admin` 能登录（默认 `admin/admin`，**记得改密码**）
 - [ ] `/sitemap.xml` 里的域名正确（不是 `127.0.0.1`）
 - [ ] `/api/status` 的 `upstream.reachable` 为 `true`
+- [ ] `/og.png` 能打开（分享图，`content-type: image/png`）
+- [ ] `/BingSiteAuth.xml` 能打开（Bing 验证文件）
+
+### 搜索引擎收录检查
+
+部署后确认这两个文件可公开访问（搜索引擎按固定路径读取，**被 Nginx
+或 robots.txt 挡住会导致验证失败**）：
+
+```bash
+curl -s -o /dev/null -w 'og.png: %{http_code} %{content_type}\n' \
+  http://licore.z321.cc.cd/og.png
+curl -s http://licore.z321.cc.cd/BingSiteAuth.xml
+```
+
+`BingSiteAuth.xml` 应输出一段含验证码的 XML。两者都在 `public/` 下，
+构建时原样拷进产物根目录，**无需额外配置 Nginx 规则**。
+
+> Nginx 配置里的 `location /_nuxt/` 长缓存规则不会影响这两个文件 ——
+> 它们走 `location /` 的默认分支。
 
 ---
 

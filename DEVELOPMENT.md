@@ -99,7 +99,7 @@ Nitro SSR 服务（Node 22+，单进程）
 
 ```
 app/                          # 前端（会被打进客户端 bundle）
-├── app.vue                   # 根组件：全局 head、canonical、主题初始化
+├── app.vue                   # 根组件：全局 head、canonical、JSON-LD 兜底、主题初始化
 ├── error.vue                 # 错误页（4xx/5xx）
 ├── assets/css/main.css       # Tailwind 入口 + 设计令牌
 ├── components/
@@ -146,7 +146,9 @@ deploy/                       # 部署脚本（三层，各管一件事）
 ├── deploy-latest.sh          # 从 Release 下载产物
 └── deploy-pm2.sh             # 发布：版本目录 + 切链 + 重载 + 回滚
 
-public/                       # 静态资源（原样拷进产物）
+public/                       # 静态资源（原样拷进产物根目录）
+                              # og.png（分享图）/ og.svg（源文件）/ logo / favicon
+                              # robots.txt / BingSiteAuth.xml（Bing 验证）/ manifest
 .github/workflows/
 ├── ci.yml                    # 类型检查 + 构建 + 冒烟 + 鉴权断言
 └── release.yml               # 打 tag + 发布 Release
@@ -545,15 +547,22 @@ export function readRuntimeToken(): string {
 
 ## 10. SEO 实现
 
+### 10.1 一张表看懂 SEO 落点
+
 | 项 | 位置 | 说明 |
 | --- | --- | --- |
-| `title` / `description` / `og:*` | 各页面 `useSeoMeta` | 每页独立撰写 |
-| `canonical` | `app/app.vue` | **computed**，随路由变化 |
-| 结构化数据 | `app/app.vue` | `application/ld+json`（SoftwareApplication） |
-| `sitemap.xml` | `nuxt.config.ts` 的 `sitemap` | 排除 `/admin` |
-| `robots.txt` | `public/robots.txt` | 静态文件 |
+| `title` / `description` | 各页面 `usePageSeo` | 每页独立撰写，`app.vue` 提供 titleTemplate |
+| `og:*` / `twitter:*` | `usePageSeo`（页面）+ `app.vue`（全站默认） | 分享图四字段由 composable 统一补全 |
+| `canonical` | `app/app.vue`（computed）+ 各页 | 两处取值一致，见 §10.2 |
+| `hreflang` | `app/app.vue` | 单语言站，声明 `zh-CN` |
+| 结构化数据（兜底） | `app/app.vue` | `Organization` + `WebSite`，全站每页都有 |
+| 结构化数据（页面级） | 各页面 | `SoftwareApplication` / `ItemList` / `TechArticle` / `AboutPage` / `BreadcrumbList` |
+| `sitemap.xml` | `nuxt.config.ts` 的 `sitemap` | 排除 `/admin`，含 `lastmod` |
+| `robots.txt` | `public/robots.txt` | 静态文件，屏蔽 `/api/` 与 `/admin` |
+| 搜索引擎验证 | `public/BingSiteAuth.xml` | Bing 站点所有权验证，见 §10.5 |
+| 404 | `app/error.vue` | 真实 404 状态码 + `noindex` |
 
-**canonical 必须是响应式的**：
+### 10.2 canonical 必须是响应式的
 
 ```ts
 const route = useRoute()
@@ -564,13 +573,84 @@ useHead({ link: computed(() => [{ rel: 'canonical', href: canonicalUrl.value }])
 如果写成 `useRoute().path` 直接取值，setup 只算一次，
 客户端路由切换后 canonical 会一直停留在进入站点时的旧路径。
 
-**description 长度控制在 155~160 字符内**。超出会被 Google 截断，
-后半句等于白写。写完用这个检查：
+页面级还会通过 `usePageSeo(meta, { path })` 再声明一份同值的 canonical。
+两处取值一致，后者覆盖前者，**不会产生重复标签**；页面级显式声明的好处是
+未来出现 query 参数或尾斜杠差异时，页面有自己的决定权。
+
+### 10.3 分享图：必须 PNG，字段必须带全
+
+**这是历史上真实踩过的坑，细节见 [§13.7.1](#1371-分享图不能用-svg)。**
+两条硬性要求：
+
+1. **图片只能是 PNG/JPEG**。SVG 不被任何主流社交抓取器支持，
+   分享出去会静默退化成纯文本链接（不报错，极难发现）。
+2. **四个字段必须带全**：`og:image`（绝对 URL）、`og:image:width`、
+   `og:image:height`、`og:image:alt`，外加 `og:image:type`。
+   部分平台拿不到宽高会拒绝渲染大图卡片。
+
+这两条**不要在各页面手写** —— 统一由 `app/composables/usePageSeo.ts` 补全。
+新增页面用它即可，分享图相关字段一个都不用写。
+
+分享图的源文件是 `public/og.svg`，产物是 `public/og.png`（1200×630）。
+**改了 SVG 必须重新栅格化**，命令行见 §13.7.1。
+
+### 10.4 结构化数据：用 `@id` 串成一张图
+
+`app.vue` 声明全站兜底的 `Organization` 与 `WebSite`，每个页面都会带上。
+页面级 JSON-LD **通过 `@id` 引用它们**，而不是各自复制一份孤立对象：
+
+```ts
+author:    { '@id': `${site.url}/#organization` },
+publisher: { '@id': `${site.url}/#organization` },
+about:     { '@id': `${site.url}/#software` },
+```
+
+三个固定锚点：`#organization`（LiStudioorg）、`#website`（本站）、
+`#software`（LiCore 本体，首页声明）。
+
+**为什么要这样**：搜索引擎借此理解「这些是同一实体的不同侧面」，
+而不是一堆互不相干的孤立对象；也是 Google 软件下载富结果识别
+publisher 的前提。全站兜底的价值在于 —— **任何一页被单独抓取时**
+都能拿到发布者信息，不必依赖首页先被发现。
+
+校验方式（每个页面都应 0 错误）：
+
+```bash
+curl -s http://127.0.0.1:3000/ > /tmp/p.html
+node -e '
+const html=require("fs").readFileSync("/tmp/p.html","utf8");
+const re=/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g;
+let m,i=0;
+while((m=re.exec(html))){i++;try{JSON.parse(m[1])}catch(e){console.log("block",i,"PARSE ERROR",e.message)}}
+console.log("blocks:",i,"— 无输出即全部通过")'
+```
+
+### 10.5 搜索引擎验证文件
+
+| 文件 | 用途 |
+| --- | --- |
+| `public/BingSiteAuth.xml` | Bing Webmaster Tools 站点验证 |
+
+放在 `public/` 下即可 —— Nuxt 构建时原样拷到产物根目录，
+以站点根路径对外提供（Bing 正是从这个固定路径读取）。
+Google 的验证通常走 DNS TXT 或 GSC 导入，目前没有对应的 HTML 文件。
+
+> ⚠️ **从外部拿到的验证文件注意权限**。附件/下载来源的文件常见权限是 `400`
+> （仅属主可读），直接提交会让服务器上的运行用户读不到，验证失败且报错含糊。
+> 提交前 `chmod 644`，与其他静态资源保持一致。
+
+### 10.6 description 长度控制
+
+**控制在 155~160 字符内**。超出会被 Google 截断，后半句等于白写。
+写完用这个检查：
 
 ```bash
 curl -s http://127.0.0.1:3000/ | grep -o 'name="description" content="[^"]*"' \
   | awk -F'"' '{print length($4)}'
 ```
+
+注意站点主要用**中文字符**，Google 的截断按像素宽度而非字符数计算，
+中文约 2 倍宽 —— 中文描述实际控制在 **75~80 个汉字**左右更稳妥。
 
 ---
 
@@ -594,7 +674,11 @@ curl -s http://127.0.0.1:3000/ | grep -o 'name="description" content="[^"]*"' \
 
 ### 改站点文案（标题、副标题、描述）
 
-改 `app/config/site.ts`，然后检查 `useSeoMeta` 有没有跟着变。
+改 `app/config/site.ts`，然后检查各页面的 `usePageSeo` 有没有跟着变。
+
+> `site.description` 在全站有三处消费：`app.vue` 的兜底 description、
+> `nuxt.config.ts` 的 `site.description`（喂给 sitemap 模块）、
+> 以及首页/关于页文案。改完记得扫一眼。
 
 ### 加一个页面
 
@@ -605,10 +689,18 @@ touch app/pages/faq.vue
 
 ```vue
 <script setup lang="ts">
-useSeoMeta({
-  title: '常见问题',
-  description: '……（155 字符内）',
-})
+usePageSeo(
+  {
+    title: '常见问题',
+    description: '……（中文控制在 75~80 字内，见 §10.6）',
+    ogTitle: 'LiCore 常见问题',
+    ogDescription: '……',
+    ogUrl: `${site.url}/faq`,
+    twitterTitle: 'LiCore 常见问题',
+    twitterDescription: '……',
+  },
+  { path: '/faq' },
+)
 </script>
 
 <template>
@@ -618,9 +710,28 @@ useSeoMeta({
 </template>
 ```
 
+**用 `usePageSeo` 而不是 `useSeoMeta`** —— 它会自动补全
+`og:image` / `twitter:image` 的绝对地址、宽高、alt、type 四个字段。
+直接写 `useSeoMeta` 会漏掉它们，分享卡片会退化（见 §10.3）。
+
 然后：
+
 1. `nuxt.config.ts` 的 `sitemap.urls` 里加一条
 2. `app/components/SiteHeader.vue` 的导航里加链接（如果需要）
+3. 建议补一个页面级 JSON-LD（`BreadcrumbList` 至少要有），
+   并用 `@id` 引用 `#organization`，见 §10.4
+4. 跑一遍 §14 的验证；CI 只断言首页的 SEO 标签，
+   **新页面的标签不会被 CI 覆盖**，要自己 curl 确认
+
+### 改分享图
+
+改 `public/og.svg` 后**必须重新栅格化** `public/og.png`：
+
+```bash
+rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png
+```
+
+注意 CJK 字体 fallback 的坑，见 [§13.7.1](#1371-分享图不能用-svg)。
 
 ### 改缓存时长
 
@@ -639,7 +750,7 @@ useSeoMeta({
 ### 改下载项的展示逻辑
 
 `server/utils/changelog.ts` 的 `buildDownloads()`。它会根据 Release
-有没有二进制资产自动决定展示什么，改之前先读 [§4.2](#42-serverutilschangelogts-业务聚合)。
+有没有二进制资产自动决定展示什么，改之前先读 [§4.2](#42-serverutilschangelogts--业务聚合)。
 
 ---
 
@@ -742,7 +853,7 @@ html.replace(/\n{2,}/g, '</p><p>').replace(/^(?!<[huop])/gm, '<p>')
 
 未捕获的上游错误会被 Nitro 记成 `[request error] [unhandled]` 并返回 500，
 日志堆栈看起来像应用崩溃。所有公开 API 路由都必须用
-`upstreamUnavailable()` 降级为 503。见 [§4.3](#43-serverutilsupstreamts-失败降级)。
+`upstreamUnavailable()` 降级为 503。见 [§4.3](#43-serverutilsupstreamts--失败降级)。
 
 ### 13.7 API 路由文件名的后缀
 
@@ -845,6 +956,10 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/api/admin/status
 - [ ] 跳转用途的按钮用的是 `LinkButton` 而不是 `Button`
 - [ ] 客户端 bundle 检查全为 0（见 [§13.3](#133-客户端-bundle-不能含服务端代码)）
 - [ ] 新增页面已加入 `sitemap.urls` 和导航
+- [ ] 新增/改动的页面用的是 **`usePageSeo`** 而不是裸 `useSeoMeta`（§10.3）
+- [ ] 页面 JSON-LD 能 `JSON.parse` 通过，且用 `@id` 引用 `#organization`（§10.4）
+- [ ] 改了 `og.svg` 的话，`og.png` 已重新生成（§10.3）
+- [ ] 从外部拿到的验证文件已 `chmod 644`（§10.5）
 
 ---
 
