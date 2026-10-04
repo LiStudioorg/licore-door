@@ -11,10 +11,21 @@
  *     优先级高于 TOML，便于容器化部署与 CI 覆盖，不必改动仓库里的文件。
  *
  * 注意：本文件只含站点自身的配置，**与 LiCore 引擎的 YAML 配置无关**。
+ *
+ * ⚠️ 本模块会被页面（`app/pages/*.vue`）经 `~~/server/utils/*` 静态引入，
+ * 因此**也会被打进客户端 bundle**。而 `node:fs` / `node:path` 在浏览器里
+ * 会被 Vite stub 成空对象、`process.cwd()` 没有对应全局，直接调用即抛错，
+ * 导致整个客户端 chunk 在模块求值阶段崩溃、水合失败。
+ * 所以下面对所有 Node 专属调用都加了 `IS_SERVER` 守卫：
+ * 客户端一律拿不到配置文件，回退到内置默认值（站点文案用的是
+ * `app/config/site.ts`，不受这里影响）。
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parse as parseToml } from 'smol-toml'
+
+/** 仅服务端为 true；客户端构建里所有 fs / process.cwd 调用都会被跳过 */
+const IS_SERVER = import.meta.server
 
 /* ------------------------------------------------------------------ *
  * 类型
@@ -152,6 +163,7 @@ function pickUrl(value: unknown, fallback: string, path: string): string {
  * 都能找到同一份配置。
  */
 function resolveConfigPath(): string | null {
+  if (!IS_SERVER) return null
   const fromEnv = process.env.LICORE_SITE_CONFIG
   if (fromEnv) {
     const p = resolve(fromEnv)
@@ -171,6 +183,7 @@ function resolveConfigPath(): string | null {
 }
 
 function loadRaw(): Record<string, unknown> {
+  if (!IS_SERVER) return {}
   const path = resolveConfigPath()
   if (!path) {
     warn('未找到 licore-site.toml，全部使用内置默认值')

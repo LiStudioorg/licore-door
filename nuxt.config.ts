@@ -99,8 +99,10 @@ export default defineNuxtConfig({
   },
 
   experimental: {
-    // 让 payload 更小，SSR 传输更快
-    payloadExtraction: false,
+    // 不要把 payloadExtraction 设为 false：
+    // 页面用 useAsyncData 把 SSR 结果写进 payload 再转移给客户端，
+    // 关掉提取会让客户端水合时重新执行 loader（在浏览器里直连 api.github.com，
+    // 消耗访客 IP 的匿名配额），且没有 __NUXT__ 脚本兜底，数据一旦取不到就白屏。
   },
 
   alias: {
