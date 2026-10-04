@@ -83,6 +83,24 @@ export default defineNuxtConfig({
 
   nitro: {
     compressPublicAssets: true,
+    /**
+     * 预渲染**纯静态**页面。
+     *
+     * /docs 的正文全部写死在 docs.vue 里，没有任何 useAsyncData / 配置开关依赖
+     * （唯一带 async 的是剪贴板按钮的处理函数）。它每次请求都走一遍 SSR 是纯浪费，
+     * 而且和动态页一样要等 Nitro 渲染完才能吐出第一个字节。
+     *
+     * 预渲染后构建期就产出静态 HTML，首字节几乎只受静态文件读取速度影响。
+     *
+     * ⚠️ 只放 /docs。其余页面（/ /changelog /download /about）的数据实时来自
+     * GitHub，**绝不能**预渲染 —— 否则版本号会固化在构建产物里，
+     * 上游发新版必须重新部署，与本站"动态 SSR"的核心设计相悖。
+     * /admin 也不预渲染（客户端渲染 + noindex）。
+     */
+    prerender: {
+      routes: ['/docs'],
+      crawlLinks: false,
+    },
     routeRules: {
       /**
        * 页面是动态 SSR，交给 CDN/反代做短暂缓存即可；
@@ -90,6 +108,18 @@ export default defineNuxtConfig({
        * 与 server/utils/github.ts 的内部缓存配合，避免打爆 GitHub 配额。
        */
       '/**': { headers: { 'x-content-type-options': 'nosniff' } },
+      /**
+       * 静态资源带内容哈希，可以放心长期强缓存 ——
+       * 文件名一变 URL 就变，不存在更新不到的问题。
+       * 不做这一步的话，每次访问都要回源校验这些 JS/CSS。
+       */
+      '/_nuxt/**': {
+        headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+      },
+      '/docs': {
+        // 预渲染出的静态页：短期共享缓存，兼顾"能被 CDN 收"与"改动及时生效"
+        headers: { 'cache-control': 'public, max-age=300, s-maxage=3600' },
+      },
     },
   },
 
