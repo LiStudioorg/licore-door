@@ -4,6 +4,10 @@
 
 站点是 **SSR 动态站点**（不是静态站），需要在服务器上常驻一个 Node 进程。
 
+> 相关文档：[README.md](./README.md)（项目概览）·
+> [DEVELOPMENT.md](./DEVELOPMENT.md)（开发与架构）·
+> [MAINTENANCE.md](./MAINTENANCE.md)（内容维护）
+
 ---
 
 ## 目录

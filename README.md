@@ -7,6 +7,15 @@ LiCore 官方网站（[github.com/LiStudioorg/licore](https://github.com/LiStudi
 站点的更新日志、版本列表与下载链接**全部由服务端实时从 GitHub 拉取并聚合**，
 上游发布新版本后无需重新部署，页面刷新即可看到最新数据。
 
+> 📚 **文档导航**
+>
+> | 文档 | 读者 | 内容 |
+> | --- | --- | --- |
+> | **README.md**（本文） | 所有人 | 项目概览、本地启动、功能说明 |
+> | [DEVELOPMENT.md](./DEVELOPMENT.md) | 改代码的人 | 架构、代码结构、改造任务、踩过的坑 |
+> | [DEPLOY.md](./DEPLOY.md) | 运维 | 服务器部署、Nginx、回滚、故障排查 |
+> | [MAINTENANCE.md](./MAINTENANCE.md) | 改内容的人 | 文案维护手册、事实核查清单 |
+
 ---
 
 ## 一、核心设计
