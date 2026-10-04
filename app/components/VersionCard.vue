@@ -76,29 +76,87 @@ const hiddenCount = computed(() =>
   props.maxItems ? Math.max(0, props.entry.changes.items.length - props.maxItems) : 0,
 )
 
-/** 渲染 Release 正文的极简 markdown（只处理标题/列表/代码/粗体/链接） */
+/**
+ * 渲染 Release 正文的极简 markdown（只处理标题 / 列表 / 代码块 / 粗体 / 行内代码 / 链接）。
+ *
+ * 实现说明：先抽出代码块占位，再逐行分类输出。
+ * 早先的正则链版本有两个 bug：
+ *   1. `(<li>...</li>)` → `<ul>$1</ul>` 会把**每一条** li 各自包一个 ul，
+ *      产出 <ul><li>a</li></ul><ul><li>b</li></ul> 这种非法结构（浏览器能容错但无语义）；
+ *   2. `\n{2,}` → `</p><p>` 之后，`^(?!<[huop])` 这行规则会把换行后的
+ *      `</p><p>` 当成正文再包一层 <p>，产出孤立的 </p>。
+ */
 const rendered = computed(() => {
   const md = props.entry.changes.markdown
   if (!md) return ''
-  return md
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _l, code) => `<pre><code>${code.trim()}</code></pre>`)
-    .replace(/^###\s+(.+)$/gm, '<h3>$1</h3>')
-    .replace(/^##\s+(.+)$/gm, '<h2>$1</h2>')
-    .replace(/^#\s+(.+)$/gm, '<h1>$1</h1>')
-    .replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(
-      /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-    )
-    .replace(/\n{2,}/g, '</p><p>')
-    .replace(/^(?!<[huop])(.+)$/gm, '<p>$1</p>')
-    .replace(/<p><\/p>/g, '')
+
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  // 代码块先占位抽走，避免内容被后续规则误伤
+  const codeBlocks: string[] = []
+  let text = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+    codeBlocks.push(`<pre><code>${esc(code.trim())}</code></pre>`)
+    return `\u0000CODE${codeBlocks.length - 1}\u0000`
+  })
+
+  const inline = (s: string) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(
+        /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+      )
+
+  const out: string[] = []
+  let list: string[] = []
+  let paragraph: string[] = []
+
+  const flushList = () => {
+    if (list.length) {
+      out.push(`<ul>${list.join('')}</ul>`)
+      list = []
+    }
+  }
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      out.push(`<p>${paragraph.join('<br>')}</p>`)
+      paragraph = []
+    }
+  }
+  const flushBoth = () => {
+    flushList()
+    flushParagraph()
+  }
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line) {
+      flushBoth()
+      continue
+    }
+    let m: RegExpMatchArray | null
+    if (line.startsWith('\u0000CODE') && line.endsWith('\u0000')) {
+      // 独占一行的代码块占位符：直接输出，不包 <p>
+      flushBoth()
+      out.push(line)
+    } else if ((m = line.match(/^#{1,3}\s+(.*)$/))) {
+      flushBoth()
+      const level = line.match(/^#+/)!.length
+      out.push(`<h${level}>${inline(m[1] ?? '')}</h${level}>`)
+    } else if ((m = line.match(/^[-*]\s+(.*)$/))) {
+      flushParagraph()
+      list.push(`<li>${inline(m[1] ?? '')}</li>`)
+    } else {
+      flushList()
+      paragraph.push(inline(line))
+    }
+  }
+  flushBoth()
+
+  return out
+    .join('\n')
+    .replace(/\u0000CODE(\d+)\u0000/g, (_mm, i?: string) => codeBlocks[Number(i)] ?? '')
 })
 
 const releaseDate = computed(() =>
@@ -229,21 +287,20 @@ const sources = computed(() => props.entry.downloads.filter((d) => !d.isBinary))
           </div>
 
           <div class="mt-3 flex flex-wrap gap-2">
-            <Button
+            <LinkButton
               v-for="dl in sources"
               :key="dl.url"
-              as="a"
               :href="dl.url"
               variant="outline"
               size="sm"
             >
               <Download class="mr-1.5 size-3.5" />
               {{ dl.arch === 'zip' ? '源码 .zip' : '源码 .tar.gz' }}
-            </Button>
-            <Button as="a" :href="entry.htmlUrl" variant="ghost" size="sm">
+            </LinkButton>
+            <LinkButton :href="entry.htmlUrl" variant="ghost" size="sm">
               <ExternalLink class="mr-1.5 size-3.5" />
               GitHub 版本页
-            </Button>
+            </LinkButton>
           </div>
 
           <p v-if="!entry.hasBinaries" class="mt-3 text-xs leading-5 text-muted-foreground">
