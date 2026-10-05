@@ -1357,7 +1357,7 @@ PY
 `og:image` 写 http 还可能让部分不跟随跳转的社交抓取器放弃渲染大图卡片
 （同 §13.7.1 的 SVG 坑：静默退化，不报错）。
 
-**根因**：域名散落在**四处**，上线 HTTPS 时没有任何一处跟着改：
+**根因**：域名散落在**五处**，上线 HTTPS 时没有任何一处跟着改：
 
 | 位置 | 作用 |
 | --- | --- |
@@ -1365,14 +1365,50 @@ PY
 | `licore-site.toml` 的 `[site].url` | 运行时配置（优先级高于上面） |
 | `server/utils/config.ts` 的 `DEFAULTS.site.url` | TOML 缺失时的**兜底默认值** |
 | `public/robots.txt` 的 Sitemap 行 | **静态文件**，改配置不会自动更新它 |
+| **`.github/workflows/ci.yml` 与 `release.yml` 的 `NUXT_PUBLIC_SITE_URL` 兜底值** | **构建期覆盖一切**（见下） |
 
 外加环境变量 `NUXT_PUBLIC_SITE_URL` 优先级最高（`nuxt.config.ts` 里
 `process.env.NUXT_PUBLIC_SITE_URL || site.url`）。**只改一两处必然漏。**
 
-**规则**：换域名或换协议时，这四处 + `robots.txt` 一起改，并跑一遍验证：
+#### 第 5 处最阴险：workflow 里的兜底值会覆盖源码
+
+这条是**真实踩到并排查出来的**，值得单独记住：
+
+```yaml
+# .github/workflows/ci.yml 与 release.yml 都曾有这一行
+NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'http://licore.z321.cc.cd' }}
+```
+
+`vars.NUXT_PUBLIC_SITE_URL` 这个仓库变量**当时并未设置**，于是每次 CI / Release
+构建都取到 `http://` 兜底值，**把 http 烘焙进产物**，反过来覆盖掉
+`app/config/site.ts` 里已经改好的 `https`。
+
+它的表现极具欺骗性：
+
+- 源码全仓搜 `http://` 是 **0 处**（五处里的四处都改干净了）；
+- CI **全绿**，冒烟测试 8 条路由全 200；
+- 只有把 Release 产物下载下来解开，才会看到
+  `.output/server/chunks/nitro/nitro.mjs` 里写着 `"siteUrl": "http://..."`
+  —— **发出去的包永远是旧协议**。
+
+**教训**：部署产物里的值与源码里的值**可以不一致**，因为构建期环境变量
+优先级更高。改协议/域名后，**必须验产物，不能只验源码**：
 
 ```bash
-# 线上四类输出必须与实际协议一致（下面按 https 站举例）
+# 构建后就地验产物（CI 已加这条断言，本地也应跑）
+grep -rn 'http://licore\.z321\.cc\.cd' .output/public/ .output/server/ && echo "有残留！" || echo "干净"
+```
+
+CI 现在会断言这一点（见 `.github/workflows/ci.yml` 的「检查站点协议一致性」），
+**源码改对但 workflow 兜底值写错**的情况不会再溜过去。
+
+**规则**：换域名或换协议时，这五处一起改，并跑一遍验证：
+
+```bash
+# ① 产物层（构建期，最早能发现问题的位置）
+grep -rn 'http://licore\.z321\.cc\.cd' .output/public/ .output/server/ || echo "产物干净"
+
+# ② 线上四类输出必须与实际协议一致（下面按 https 站举例）
 curl -s https://licore.z321.cc.cd/ | grep -oE 'rel="canonical" href="[^"]*"'
 curl -s https://licore.z321.cc.cd/ | grep -oE 'property="og:image"[^>]*'
 curl -s https://licore.z321.cc.cd/sitemap.xml | grep -oE '<loc>[^<]*</loc>' | head -3
@@ -1500,7 +1536,7 @@ curl -s http://127.0.0.1:3111/api/site-config
 - [ ] 没有给动态页面加预渲染（只有 `/docs` 允许，见 [§13.11③](#③-docs-构建期预渲染)）
 - [ ] 没有把 `buildDownloads()` 改回下发完整 `log.versions`（[§13.11②](#②-ssr-payload-按页裁剪)）
 - [ ] 页面上的 `fuxsto-design` 导入都是**真的用到了**（跳转按钮用 `LinkButton`）
-- [ ] 换域名/协议时，`site.ts` / `licore-site.toml` / `config.ts` 的 `DEFAULTS` / `robots.txt` **四处一起改**，并核对线上 canonical 与 og 字段（[§13.12](#1312-站点上了-https但-canonical-还写着-http)）
+- [ ] 换域名/协议时，**五处**一起改：`site.ts` / `licore-site.toml` / `config.ts` 的 `DEFAULTS` / `robots.txt` / **`.github/workflows/*.yml` 的 `NUXT_PUBLIC_SITE_URL` 兜底值**，并**验产物**（`grep -rn 'http://<域名>' .output/`）与线上 canonical（[§13.12](#1312-站点上了-https但-canonical-还写着-http)）
 - [ ] `sitemap.xml` 的 `lastmod` 不是"当前时间"，且连续请求保持稳定（[§13.13](#1313-sitemap-的-lastmod-不能是当前时间)）
 - [ ] 新增/修改的页面 `description` 在 **80 个汉字以内**（§10.6）
 

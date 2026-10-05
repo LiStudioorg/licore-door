@@ -103,8 +103,16 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         run: npm run build
         env:
-          # 构建期只需要站点地址；GitHub 数据是运行时拉取的，这里不需要 token
-          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'http://licore.z321.cc.cd' }}
+          # 构建期只需要站点地址；GitHub 数据是运行时拉取的，这里不需要 token。
+          #
+          # ⚠️ 这里的兜底值必须与线上实际协议一致（站点跑 HTTPS）。
+          #    曾经写的是 http://，而仓库变量 vars.NUXT_PUBLIC_SITE_URL 并未设置，
+          #    于是**每次发行都把 http:// 烘焙进产物**，覆盖掉
+          #    app/config/site.ts 里的 https —— 部署出去的站点
+          #    canonical / og:url / sitemap 全是 http，与实际页面自相矛盾。
+          #    这正是「发出去的包永远是旧协议」的根因。
+          #    改这里时务必与 app/config/site.ts 的 site.url 保持一致。
+          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'https://licore.z321.cc.cd' }}
 
       - name: 打包部署产物
         if: steps.version.outputs.skip == 'false'

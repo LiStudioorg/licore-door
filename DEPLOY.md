@@ -476,14 +476,27 @@ sudo certbot --nginx -d licore.z321.cc.cd
 > "正版是 http 版"，而爬虫实际抓到的是 https 版 —— 索引信号被劈成两半，
 > 抓取配额还会被 301 白白消耗（`og:image` 走 http 还可能让社交卡片静默退化）。
 >
-> 域名在**四处**定义，改的时候**四处一起改**（漏一处就前功尽弃）：
+> 域名在**五处**定义，改的时候**五处一起改**（漏一处就前功尽弃）：
 >
 > | 位置 | 说明 |
 > | --- | --- |
 > | 环境变量 `NUXT_PUBLIC_SITE_URL` | 优先级最高，生产环境多由此覆盖 |
+> | **`.github/workflows/ci.yml` 与 `release.yml` 的 `NUXT_PUBLIC_SITE_URL` 兜底值** | **构建期覆盖源码**；写错会让发出去的包永远是旧协议（见下） |
 > | `licore-site.toml` 的 `[site].url` | 面板上也能改，保存即生效 |
 > | `app/config/site.ts` 的 `site.url` | 构建期默认值（需重新构建才生效） |
 > | `public/robots.txt` 的 Sitemap 行 | **静态文件**，改配置不会自动更新它 |
+>
+> ⚠️ **最容易漏的是 workflow 里那个兜底值**。它是
+> `${{ vars.NUXT_PUBLIC_SITE_URL || 'http://…' }}` 的形式：仓库变量没设置时
+> 就用引号里那个字符串，**把 http 烘焙进产物、覆盖掉源码里的 https**。
+> 现象极隐蔽：源码全仓搜不到 `http://`、CI 全绿、页面 200 正常，
+> 只有解开 Release 产物才看得到 `"siteUrl": "http://…"`。
+> 因此**改完必须验产物，不能只验源码**：
+>
+> ```bash
+> grep -rn 'http://licore\.z321\.cc\.cd' .output/public/ .output/server/ \
+>   && echo "产物里有残留，检查 workflow 的兜底值" || echo "产物干净"
+> ```
 
 **PM2 方式**：
 ```bash
@@ -680,7 +693,7 @@ curl -I http://127.0.0.1:3000/
 | 页面打开但实时数据是 `—` | GitHub 配额耗尽或网络不通。`curl http://127.0.0.1:3000/api/status` |
 | 构建时被 Killed（OOM） | 服务器内存不足。在本地构建后只传 `.output` 产物 |
 | sitemap/canonical 里是 `127.0.0.1` | `NUXT_PUBLIC_SITE_URL` 没设对 |
-| 站点是 HTTPS，但 canonical / og:url / sitemap 里是 `http://` | 协议没跟着改。四处一起改：`NUXT_PUBLIC_SITE_URL`、`licore-site.toml`、`app/config/site.ts`、`public/robots.txt`（见 §5.2）。这是**索引信号被劈成两半**的严重问题，务必修 |
+| 站点是 HTTPS，但 canonical / og:url / sitemap 里是 `http://` | 协议没跟着改。**五处**一起改：`NUXT_PUBLIC_SITE_URL`、**两个 workflow 的兜底值**、`licore-site.toml`、`app/config/site.ts`、`public/robots.txt`（见 §5.2）。**若源码已改对但仍不对，一定是 workflow 兜底值**——它会在构建期覆盖源码，验产物：`grep -rn 'http://<域名>' .output/`。这是**索引信号被劈成两半**的严重问题，务必修 |
 | `sitemap.xml` 的 `lastmod` 每次抓取都变 | 曾用 `autoLastmod: true`（打当前时间，会被搜索引擎忽略）。现由 `/api/sitemap-urls` 提供真实 `pushed_at`；若仍异常，检查该接口能否取到上游数据 |
 | `/admin` 登录不上 | 配置文件改了但没重启；或会话过期（默认 12 小时） |
 | 更新后页面还是旧内容 | `current` 软链没切到新目录。`readlink /opt/licore-website/current` |

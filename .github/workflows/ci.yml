@@ -27,6 +27,30 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      # 站点域名在五处定义，最容易漏的是 workflow 里的 NUXT_PUBLIC_SITE_URL 兜底值：
+      # 它在构建期覆盖 app/config/site.ts，写错会让产物带上旧协议，
+      # 而源码、CI、页面状态码全都正常，只有 canonical 悄悄错掉。
+      # 这里强制两者一致，从源头杜绝漂移。
+      - name: 校验站点域名与源码一致
+        run: |
+          set -euo pipefail
+          if [ -n "${{ vars.NUXT_PUBLIC_SITE_URL }}" ]; then
+            echo "使用仓库变量 vars.NUXT_PUBLIC_SITE_URL=${{ vars.NUXT_PUBLIC_SITE_URL }}"
+            exit 0
+          fi
+          # 取 app/config/site.ts 里 site.url 的实际值
+          SOURCE_URL=$(grep -oE "url: '[^']+'" app/config/site.ts | head -1 | sed "s/url: '//;s/'//")
+          echo "源码 site.url       = ${SOURCE_URL}"
+          echo "workflow 兜底值     = ${{ env.NUXT_PUBLIC_SITE_URL }}"
+          if [ "${SOURCE_URL}" != "${{ env.NUXT_PUBLIC_SITE_URL }}" ]; then
+            echo "::error::workflow 的 NUXT_PUBLIC_SITE_URL 兜底值与 app/config/site.ts 的 site.url 不一致。"
+            echo "::error::它在构建期优先级更高，会让产物用上错误的域名/协议。请把两者改成一致。"
+            exit 1
+          fi
+          echo "✓ 兜底值与源码一致"
+        env:
+          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'https://licore.z321.cc.cd' }}
+
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,8 +73,15 @@ jobs:
       - name: 生产构建
         run: npm run build
         env:
-          # 构建期只需要站点地址；GitHub 数据是运行时拉取的，这里不需要 token
-          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'http://licore.z321.cc.cd' }}
+          # 构建期只需要站点地址；GitHub 数据是运行时拉取的，这里不需要 token。
+          #
+          # ⚠️ 这里的兜底值必须与线上实际协议一致（站点跑 HTTPS）。
+          #    曾经写的是 http://，而仓库变量 vars.NUXT_PUBLIC_SITE_URL 并未设置，
+          #    于是**每次 CI/Release 构建都把 http:// 烘焙进产物**，
+          #    覆盖掉 app/config/site.ts 里的 https —— 部署出去的站点
+          #    canonical / og:url / sitemap 全是 http，与实际页面自相矛盾。
+          #    改这里时务必与 app/config/site.ts 的 site.url 保持一致。
+          NUXT_PUBLIC_SITE_URL: ${{ vars.NUXT_PUBLIC_SITE_URL || 'https://licore.z321.cc.cd' }}
 
       - name: 冒烟测试（启动产物并检查路由）
         env:
@@ -169,6 +200,57 @@ jobs:
             fi
           done
           rm -f /tmp/smoke-home.html
+
+          # 站点协议一致性：产物里不允许出现 http:// 的站点域名。
+          #
+          # 为什么必须在 CI 断言：站点跑在 HTTPS 上，如果构建把 http:// 烘焙进产物，
+          # 线上每一页的 canonical / og:url / sitemap 都会声明"正版是 http 版"，
+          # 而爬虫抓到的是 https 版 —— 索引信号被劈成两半，且 301 白耗抓取配额。
+          # 这个坑真实发生过：workflow 里的 NUXT_PUBLIC_SITE_URL 兜底值写的是
+          # http://，而仓库变量未设置，于是**每次发行都把 http 烘焙进产物**，
+          # 覆盖掉源码里的 https，页面本身 200 正常，只在 canonical 上悄悄错掉。
+          # 冒烟测试只看 HTTP 状态码，完全拦不住这类问题。
+          echo "检查站点协议一致性…"
+          if grep -rq 'http://licore\.z321\.cc\.cd' .output/public/ .output/server/ 2>/dev/null; then
+            echo "  ✗ 产物中存在 http:// 的站点域名（canonical 会与实际协议矛盾）："
+            grep -rn 'http://licore\.z321\.cc\.cd' .output/public/ .output/server/ 2>/dev/null | head -5
+            echo "::error::构建产物的站点域名协议不一致，检查 workflow 的 NUXT_PUBLIC_SITE_URL 兜底值与 app/config/site.ts"
+            FAIL=1
+          else
+            echo "  ✓ 产物中无 http:// 站点域名"
+          fi
+
+          # canonical 必须与构建时的站点协议一致（应为 https）
+          curl -s "$TEST_URL/" -o /tmp/smoke-canonical.html
+          if grep -q 'rel="canonical" href="https://' /tmp/smoke-canonical.html; then
+            echo "  ✓ canonical 使用 https"
+          else
+            echo "  ✗ canonical 不是 https："
+            grep -o 'rel="canonical" href="[^"]*"' /tmp/smoke-canonical.html || true
+            echo "::error::canonical 协议与线上不一致（站点跑 HTTPS）"
+            FAIL=1
+          fi
+          rm -f /tmp/smoke-canonical.html
+
+          # sitemap 的 <loc> 同样必须是 https
+          curl -s "$TEST_URL/sitemap.xml" -o /tmp/smoke-sitemap.xml
+          if grep -q '<loc>https://' /tmp/smoke-sitemap.xml; then
+            echo "  ✓ sitemap 使用 https"
+          else
+            echo "  ✗ sitemap 的 <loc> 不是 https"
+            echo "::error::sitemap 协议与线上不一致"
+            FAIL=1
+          fi
+
+          # lastmod 不应等于"当前时间"（那会被搜索引擎忽略）。
+          # 上游不可达时允许省略 lastmod，但若存在就必须是个合理的历史时间。
+          if grep -q '<lastmod>' /tmp/smoke-sitemap.xml; then
+            lm=$(grep -oE '<lastmod>[^<]*</lastmod>' /tmp/smoke-sitemap.xml | head -1 | sed 's/<[^>]*>//g')
+            echo "  ✓ sitemap 含 lastmod：${lm}"
+          else
+            echo "  ⚠ sitemap 无 lastmod（上游不可达时属正常，不判失败）"
+          fi
+          rm -f /tmp/smoke-sitemap.xml
 
           if [ "$FAIL" -ne 0 ]; then
             echo "::error::冒烟测试未通过"
