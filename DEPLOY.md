@@ -469,14 +469,27 @@ sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d licore.z321.cc.cd
 ```
 
-拿到证书后，把 `NUXT_PUBLIC_SITE_URL` 改成 `https://...`（否则 canonical 与
-sitemap 里仍是 http），然后重启服务：
+> 🔴 **启用 HTTPS 后必须把站点协议改成 https，这一步不能省。**
+>
+> 站点若经 CDN / Nginx 把 `http://` 301 到 `https://`，而配置里仍写着 `http://`，
+> 那么**每个页面**的 canonical、`og:url`、sitemap 的 `<loc>` 都会声明
+> "正版是 http 版"，而爬虫实际抓到的是 https 版 —— 索引信号被劈成两半，
+> 抓取配额还会被 301 白白消耗（`og:image` 走 http 还可能让社交卡片静默退化）。
+>
+> 域名在**四处**定义，改的时候**四处一起改**（漏一处就前功尽弃）：
+>
+> | 位置 | 说明 |
+> | --- | --- |
+> | 环境变量 `NUXT_PUBLIC_SITE_URL` | 优先级最高，生产环境多由此覆盖 |
+> | `licore-site.toml` 的 `[site].url` | 面板上也能改，保存即生效 |
+> | `app/config/site.ts` 的 `site.url` | 构建期默认值（需重新构建才生效） |
+> | `public/robots.txt` 的 Sitemap 行 | **静态文件**，改配置不会自动更新它 |
 
 **PM2 方式**：
 ```bash
 # 编辑 ecosystem 或 TOML
 nano /opt/licore-website/ecosystem.config.cjs
-# 修改 NUXT_PUBLIC_SITE_URL
+# 修改 NUXT_PUBLIC_SITE_URL 为 https://licore.z321.cc.cd
 pm2 reload licore-website --update-env
 ```
 
@@ -486,6 +499,26 @@ sudo sed -i 's|^NUXT_PUBLIC_SITE_URL=.*|NUXT_PUBLIC_SITE_URL=https://licore.z321
   /opt/licore-website/current/.env
 sudo systemctl restart licore-website
 ```
+
+**别忘了手改 `robots.txt`**（它不受环境变量影响）：
+
+```bash
+# 在部署根目录（如 /opt/licore-website/current/.output/public/robots.txt）
+sudo sed -i 's|^Sitemap: http://|Sitemap: https://|' \
+  /opt/licore-website/current/.output/public/robots.txt
+```
+
+**改完必须验证**（四类输出都应为 `https://`）：
+
+```bash
+B=https://licore.z321.cc.cd
+curl -s $B/            | grep -oE 'rel="canonical" href="[^"]*"'
+curl -s $B/            | grep -oE 'property="og:(url|image)"[^>]*'
+curl -s $B/sitemap.xml | grep -oE '<loc>[^<]*</loc>' | head -3
+curl -s $B/robots.txt  | grep -i sitemap
+```
+
+> 出现任何一处 `http://` 都说明上面四处没改全。
 
 ---
 
@@ -647,6 +680,8 @@ curl -I http://127.0.0.1:3000/
 | 页面打开但实时数据是 `—` | GitHub 配额耗尽或网络不通。`curl http://127.0.0.1:3000/api/status` |
 | 构建时被 Killed（OOM） | 服务器内存不足。在本地构建后只传 `.output` 产物 |
 | sitemap/canonical 里是 `127.0.0.1` | `NUXT_PUBLIC_SITE_URL` 没设对 |
+| 站点是 HTTPS，但 canonical / og:url / sitemap 里是 `http://` | 协议没跟着改。四处一起改：`NUXT_PUBLIC_SITE_URL`、`licore-site.toml`、`app/config/site.ts`、`public/robots.txt`（见 §5.2）。这是**索引信号被劈成两半**的严重问题，务必修 |
+| `sitemap.xml` 的 `lastmod` 每次抓取都变 | 曾用 `autoLastmod: true`（打当前时间，会被搜索引擎忽略）。现由 `/api/sitemap-urls` 提供真实 `pushed_at`；若仍异常，检查该接口能否取到上游数据 |
 | `/admin` 登录不上 | 配置文件改了但没重启；或会话过期（默认 12 小时） |
 | 更新后页面还是旧内容 | `current` 软链没切到新目录。`readlink /opt/licore-website/current` |
 | PM2 进程反复重启 | 看 `pm2 logs licore-website --lines 100` 找崩溃原因 |

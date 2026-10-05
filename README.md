@@ -1,11 +1,18 @@
 # LiCore 官网
 
+线上地址：**<https://licore.z321.cc.cd>**
+
 LiCore 官方网站（[github.com/LiStudioorg/licore](https://github.com/LiStudioorg/licore)），
 基于 **Nuxt 4** + **[fuxsto-design](https://npmmirror.com/package/fuxsto-design)** 构建，
 是一个**服务端渲染的动态站点**。
 
 站点的更新日志、版本列表与下载链接**全部由服务端实时从 GitHub 拉取并聚合**，
 上游发布新版本后无需重新部署，页面刷新即可看到最新数据。
+
+> ⚠️ **站点跑在 HTTPS 上**：域名在 `app/config/site.ts`、`licore-site.toml`、
+> `server/utils/config.ts` 的 `DEFAULTS`、`public/robots.txt` **四处**定义，
+> 换域名或换协议时四处都要改，否则 canonical 会与实际抓取的页面自相矛盾
+> （详见 [DEVELOPMENT.md §13.12](./DEVELOPMENT.md#1312-站点上了-https但-canonical-还写着-http)）。
 
 > 📚 **文档导航**
 >
