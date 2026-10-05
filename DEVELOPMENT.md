@@ -1231,8 +1231,13 @@ const { data } = await useAsyncData('home', async () => {
 | `/download` HTML | 220,169 B | **86,597 B**（−61%） |
 | 全局 CSS | 143,246 B（gzip 21,620 B） | **104,188 B（gzip 15,399 B）** |
 | 首页 SSR payload | 72,681 字符 | **30,024 字符** |
-| `/download` SSR payload | 约 160,000 字符 | **32,204 字符** |
+| `/download` 的 versions 数据 | 44,796 字符（43.7 KB） | **27,600 字符（27.0 KB）** |
 | `/docs` TTFB | 25 ms（每次 SSR） | **15 ms（构建期预渲染）** |
+
+> 上表的 payload 数字是「版本数组本身的 JSON 长度」，用
+> `curl -s $B/api/changelog` 与 `$B/api/downloads` 对比即可复现。
+> 另注：优化前 `/download` 的 HTML 之所以到 220 KB，是 payload 之外还叠加了
+> 当时未被裁剪的其它数据；单看 versions 一项的净收益是 17 KB。
 
 #### ① CSS 不再整份引入组件库（收益最大）
 
@@ -1270,7 +1275,8 @@ const { data } = await useAsyncData('home', async () => {
   → `buildDownloads()` 返回裁剪后的 `VersionSummary`。
 
 > ⚠️ **不要再把 `buildDownloads()` 改回直接下发 `log.versions`。**
-> 那会让 `/download` 平白多出约 160 KB JSON，而渲染结果完全一样。
+> 那会让 `/download` 平白多出约 17 KB JSON（实测 27.6 KB → 44.8 KB），
+> 而渲染结果完全一样。
 > 将来若要在下载页展示某版本的变更明细，正确做法是**新增按需接口**
 > （如 `/api/changelog?v=...`），而不是把全部明细塞回首屏。
 >

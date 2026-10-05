@@ -344,13 +344,42 @@ rm -f "$JAR" licore-site.toml.bak
 > 第 3、5 条是最容易回归的点：**改写 TOML 必须保留注释、且可重复执行不漂移**。
 > 换用 `stringify()` 整份重写就会把注释抹光，CI 不检查这个，只有这里能拦住。
 
-**注意**：改动 SEO 相关字段（3.4 节）时，额外确认输出：
+**如果改动了 SEO 相关字段**（3.4 节）时，额外确认输出：
 
 ```bash
 curl -s http://127.0.0.1:3111/ | grep -oE '<title>[^<]*</title>|<meta name="description" content="[^"]{0,80}'
 ```
 
 `<title>` 里不应出现重复的 "LiCore | LiCore"；description 不应被截断成半句话。
+
+**如果改动涉及页面结构 / 样式引入 / 组件库**（`app/pages/*.vue`、`app/assets/css/*`、
+`nuxt.config.ts`、升级 `fuxsto-design`），额外跑一次**渲染类覆盖检查**：
+
+```bash
+python3 - <<'PY'
+import re, urllib.request, collections, glob
+css = open(glob.glob('.output/public/_nuxt/entry.*.css')[0], encoding='utf8').read()
+tokens = collections.Counter()
+for p in ['/', '/changelog', '/download', '/docs', '/about', '/admin']:
+    h = urllib.request.urlopen('http://127.0.0.1:3111' + p).read().decode('utf8', 'ignore')
+    for m in re.findall(r'class="([^"]*)"', h):
+        for t in m.split():
+            tokens[t] += 1
+def has(cls):
+    esc = ''.join(('\\' + c) if c in ':/.[]()#%,!&*' else c for c in cls)
+    return ('.' + esc) in css
+markers = ('lucide', 'router-link', 'nuxt-link')
+missing = [(t, n) for t, n in tokens.items() if not has(t) and not any(t.startswith(m) for m in markers)]
+print('渲染 class 总数:', len(tokens), '缺失:', len(missing))
+for t, n in sorted(missing, key=lambda x: -x[1])[:20]:
+    print('  ', t, n)
+PY
+# 期望：缺失 0
+```
+
+> 这一条**不是可选项**。样式的按需生成一旦少生成了类，页面**不会报错**，
+> 只是按钮/卡片看着"没样式了" —— 而第 5 步的冒烟测试只看 HTTP 200，
+> 完全拦不住。详见 [DEVELOPMENT.md §13.11](./DEVELOPMENT.md#1311-首屏性能四个已做的优化与它们的护栏)。
 
 ### 第 6 步：提交
 
@@ -396,6 +425,18 @@ git push origin main
 5. **保持中文**。站点是单语言中文站，不要引入英文段落。
 6. **不确定就不要写**。上游 README 没提的功能、你无法验证的参数，
    宁可不写也不要推测。在报告里说明"无法确认"。
+7. **别碰首屏性能的四条护栏**。你改文案时通常碰不到，但一旦顺手"简化"就会
+   让页面变慢或掉样式，而且**都不会报错**：
+
+   | 别做 | 为什么 |
+   | --- | --- |
+   | 把 `app/assets/css/main.css` 改回 `@import 'fuxsto-design/styles'` | 会重新引入整库 112 KB 样式，55% 用不到却阻塞首屏 |
+   | 改 `@source` 的层数 | 层数写错 Tailwind 不报错，只静默少生成样式 |
+   | 改 `app/assets/css/fuxsto-theme.css` | 它是从组件库摘出的设计令牌，手改会和库版本脱节 |
+   | 给 `/` `/changelog` `/download` `/about` 加预渲染 | 会把版本号固化进构建产物，上游发版就得重新部署 |
+   | 把 `buildDownloads()` 改回下发完整 `log.versions` | 下载页会平白多传约 17 KB JSON |
+
+   细节见 [DEVELOPMENT.md §13.11](./DEVELOPMENT.md#1311-首屏性能四个已做的优化与它们的护栏)。
 
 ---
 
@@ -461,6 +502,8 @@ git push origin main
 | `app/pages/download.vue` | 下载页 | ❌ 自动适配 |
 | `app/pages/admin.vue` | 后台管理面板 | ❌ 与上游内容无关 |
 | `app/config/site.ts` | 站点元信息（域名、SEO 描述） | ⚠️ 仅 description/tagline |
+| `app/assets/css/main.css` | 样式入口 + 站点令牌 + 通用类 | ❌ 不要动（见第 5 节第 7 条） |
+| `app/assets/css/fuxsto-theme.css` | 从组件库摘出的设计令牌（1.4 KB） | ❌ 不要动 |
 | `app/composables/usePageSeo.ts` | 页面 SEO 统一入口（分享图字段） | ❌ 不要动 |
 | `app/app.vue` | 全局 head、canonical、JSON-LD 兜底 | ❌ 不要动 |
 | `public/og.svg` / `public/og.png` | 分享图源文件与产物 | ❌ 与上游内容无关 |
@@ -474,7 +517,7 @@ git push origin main
 | `server/utils/github.ts` | GitHub 数据层（缓存/TTL） | ❌ 不要动 |
 | `README.md` | 项目说明（给人看） | ⚠️ 功能变化时同步 |
 | `DEPLOY.md` | 部署指南 | ❌ 除非部署方式变了 |
-| `DEVELOPMENT.md` | 开发文档（架构、SEO、踩坑） | ❌ 不要动 |
+| `DEVELOPMENT.md` | 开发文档（架构、SEO、首屏性能与踩坑） | ❌ 不要动（改代码后由改代码的人同步） |
 | `.github/workflows/ci.yml` | CI（类型检查+构建+冒烟） | ❌ 不要动 |
 | `.github/workflows/release.yml` | 自动发行（打 tag + 发 Release） | ❌ 不要动 |
 
