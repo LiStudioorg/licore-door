@@ -2,8 +2,17 @@
  * 站点级配置。所有 SEO / 外链相关的常量集中在此，改域名只需改这里。
  */
 export const site = {
-  /** 规范站点地址（canonical / og:url / sitemap 均以此为准） */
-  url: 'http://licore.z321.cc.cd',
+  /**
+   * 规范站点地址（canonical / og:url / sitemap 均以此为准）。
+   *
+   * ⚠️ 必须与**线上实际提供的协议**一致。站点经 CDN 把 http 301 到 https，
+   * 若这里留 http，等于在每个页面上声明「正版是 http 版」，而爬虫抓到的是
+   * https 版 —— canonical 自相矛盾，索引信号被劈成两半。
+   *
+   * 换域名/协议时这里要改，`licore-site.toml` 的 `[site].url` 与
+   * `public/robots.txt` 的 Sitemap 行**同样要改**（共三处，见 MAINTENANCE.md §10）。
+   */
+  url: 'https://licore.z321.cc.cd',
   name: 'LiCore',
   title: 'LiCore — 轻量级容器引擎',
   /**

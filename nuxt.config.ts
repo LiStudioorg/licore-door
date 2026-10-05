@@ -66,19 +66,33 @@ export default defineNuxtConfig({
    * （生产环境下 sitemap 里的绝对地址即取自该值）。
    */
   sitemap: {
-    autoLastmod: true,
+    /**
+     * ⚠️ 必须关掉 autoLastmod。
+     *
+     * 它给每条 URL 打上"当前时间"作为 lastmod，于是每次抓取 sitemap 时
+     * 所有页面的 lastmod 都是刚刚 —— 搜索引擎会识别并**忽略**这种
+     * "每次抓取都变"的 lastmod，等于白写。
+     *
+     * 真实时间改由下面 `sources` 指向的 `/api/sitemap-urls` 提供。
+     */
+    autoLastmod: false,
     // 后台面板会被 sitemap 模块自动发现，必须显式排除：
     // 该页面本身已是 noindex，若再出现在 sitemap 里会给爬虫互相矛盾的信号。
     exclude: ['/admin'],
-    // changefreq / priority 属于"每条 URL 的默认值"，需放在 defaults 里
-    defaults: { changefreq: 'daily', priority: 0.8 },
-    urls: [
-      { loc: '/', changefreq: 'daily', priority: 1.0 },
-      { loc: '/changelog', changefreq: 'daily', priority: 0.9 },
-      { loc: '/download', changefreq: 'weekly', priority: 0.9 },
-      { loc: '/docs', changefreq: 'weekly', priority: 0.8 },
-      { loc: '/about', changefreq: 'monthly', priority: 0.6 },
-    ],
+    /**
+     * 动态 lastmod 来源。
+     *
+     * ⚠️ 这里用 `sources.fetch` 指向**自己的 API 路由**，而不是把 `urls`
+     * 写成函数 —— 模块会把 `urls` 在**构建期求值并序列化**进
+     * `.output/server/chunks/virtual/global-sources.mjs`，运行期不再调用，
+     * 于是 lastmod 会固化在构建那一刻（实测过，函数写法的产物里
+     * urls 是一份静态数组）。`fetch` 形式的源则是在**每次请求 sitemap 时**
+     * 通过 `event.$fetch` 拉取，才是真正的运行时取值。
+     *
+     * `/api/sitemap-urls` 会从数据层取仓库 `pushed_at` 作为 lastmod；
+     * 上游不可达时它省略 lastmod（缺失比假时间安全）。
+     */
+    sources: ['/api/sitemap-urls'],
   },
 
   nitro: {

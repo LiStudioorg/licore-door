@@ -99,12 +99,18 @@ const tagCount = changelog?.source.tagCount ?? 0
 /** 首页标题即站名，用绝对标题避免 titleTemplate 再拼一次 LiCore */
 const title = `${site.name} — ${site.tagline}`
 /**
- * 注意：不要再把整段 site.description 拼上版本信息 —— 那样总长会到 180+ 字符，
- * 超出 Google 截断线（约 155–160），搜索摘要会被直接砍掉后半句。
- * 这里单独写一版短描述，版本信息只占一行。
+ * ⚠️ description 必须控制在 **80 个汉字以内**。
+ *
+ * Google 按**像素宽度**截断（约 155–160 字符），中文约为英文 2 倍宽，
+ * 所以英文的 155 字符经验值在这里相当于 ~78 个汉字。超出部分会被砍掉，
+ * 且往往停在半句上，反而拉低点击率 —— 写多了等于没写。
+ *
+ * 实测校验：
+ *   curl -s https://licore.z321.cc.cd/ \
+ *     | grep -o 'name="description" content="[^"]*"' | awk -F'"' '{print length($4)}'
  */
 const description = latest
-  ? `LiCore — 用 Go 编写的轻量级容器引擎：无守护进程、单二进制分发、运行时内存目标 10–20 MiB、自研 .licore 镜像格式。最新版本 ${latest.version}${latest.date ? `（${formatDate(latest.date)} 发布）` : ''}，更新日志与下载链接自动同步自 GitHub。`
+  ? `LiCore 轻量级容器引擎：无守护进程、单二进制分发、自研 .licore 镜像格式。最新版本 ${latest.version}。`
   : site.description
 
 usePageSeo(

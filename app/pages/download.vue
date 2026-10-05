@@ -122,13 +122,18 @@ const buildSteps = computed(() => [
 
 /* ---------------- SEO ---------------- */
 /**
- * 描述必须控制在 155 字符以内，否则 Google 会在搜索结果里直接截断。
- * 平台清单只取不重复的 OS 名，不要把每个 os/arch 组合都拼进去（会轻松到 230+ 字符）。
+ * ⚠️ description 必须控制在 **80 个汉字以内**（Google 按像素截断，见 index.vue）。
+ *
+ * 这里的难点是平台清单来自上游数据、长度不可控：上游多发一个平台的产物，
+ * 描述就会变长从而被截断。因此**只取前 3 个平台名并加"等"**，
+ * 长度就与上游产物数量解耦了 —— 平台全集在页面正文里展示，不靠描述承载。
  */
-const platforms = [...new Set(binaries.map((b) => b.os))].join(' / ')
+const platformList = [...new Set(binaries.map((b) => b.os))]
+const platforms =
+  platformList.length > 3 ? `${platformList.slice(0, 3).join(' / ')} 等` : platformList.join(' / ')
 const description = hasBinaries
-  ? `下载 LiCore ${latest?.version} 官方构建产物，支持 ${platforms}。下载链接自动同步自 GitHub Release，同时提供源码编译指引与完整构建矩阵说明。`
-  : `下载 LiCore ${latest?.version ?? '最新版'}。上游当前未提供预编译二进制，本页提供官方源码归档下载与本地编译指引（Linux amd64/arm64、Android arm64）。`
+  ? `下载 LiCore ${latest?.version} 官方构建产物，支持 ${platforms}，链接自动同步自 GitHub Release。`
+  : `下载 LiCore ${latest?.version ?? '最新版'}：官方源码归档与本地编译指引（Linux amd64/arm64、Android arm64）。`
 
 usePageSeo(
   {

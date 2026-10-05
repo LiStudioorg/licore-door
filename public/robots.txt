@@ -1,8 +1,9 @@
 # LiCore 官网 robots.txt
-# 注意：Sitemap 必须是绝对地址，且站点域名变更后这里要同步修改
+# 注意：Sitemap 必须是绝对地址，且站点域名/协议变更后这里要同步修改
 #（域名同时定义在 app/config/site.ts 与 licore-site.toml，见 MAINTENANCE.md §10）。
+# ⚠️ 这是静态文件，改配置不会自动更新它，必须手工改。
 
-Sitemap: http://licore.z321.cc.cd/sitemap.xml
+Sitemap: https://licore.z321.cc.cd/sitemap.xml
 
 User-agent: *
 Allow: /

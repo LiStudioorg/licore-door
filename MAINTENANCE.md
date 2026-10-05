@@ -515,6 +515,8 @@ git push origin main
 | `server/api/admin/` | 后台接口 | ❌ 不要动 |
 | `server/utils/changelog.ts` | 版本与下载聚合 | ❌ 不要动 |
 | `server/utils/github.ts` | GitHub 数据层（缓存/TTL） | ❌ 不要动 |
+| `server/api/sitemap-urls.get.ts` | sitemap 的动态 URL 源（提供真实 `lastmod`） | ❌ 不要动 |
+| `app/pages/*.vue` 的 `description` | 页面 SEO 描述 | ⚠️ 改文案时**必须 ≤80 个汉字**，超出会被 Google 截断 |
 | `README.md` | 项目说明（给人看） | ⚠️ 功能变化时同步 |
 | `DEPLOY.md` | 部署指南 | ❌ 除非部署方式变了 |
 | `DEVELOPMENT.md` | 开发文档（架构、SEO、首屏性能与踩坑） | ❌ 不要动（改代码后由改代码的人同步） |

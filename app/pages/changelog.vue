@@ -134,7 +134,8 @@ const sourceLabel: Record<string, string> = {
 }
 
 /* ---------------- SEO ---------------- */
-const description = `LiCore 全部版本更新日志，共 ${versions.length} 个版本${latestVersion ? `，最新为 ${latestVersion.version}` : ''}。版本、变更内容与下载链接均由本站服务端自动从 GitHub 仓库拉取并聚合，无需人工维护。`
+/** ⚠️ 控制在 80 个汉字以内，超出会被 Google 按像素截断（见 index.vue 的说明） */
+const description = `LiCore 全部版本更新日志，共 ${versions.length} 个版本${latestVersion ? `，最新为 ${latestVersion.version}` : ''}，由服务端自动从 GitHub 聚合。`
 
 usePageSeo(
   {

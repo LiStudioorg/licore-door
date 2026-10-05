@@ -19,8 +19,10 @@
 # ----------------------------------------------------------------------------
 [site]
 # 站点规范地址。用于 canonical / og:url / sitemap 的绝对地址。
+# 必须与线上实际提供的协议一致（站点经 CDN 把 http 301 到 https，此处写 http
+# 会让 canonical 与实际抓取到的 https 页面自相矛盾）。
 # 换域名时改这里一处即可（等价环境变量 NUXT_PUBLIC_SITE_URL，优先级更高）。
-url = "http://licore.z321.cc.cd"
+url = "https://licore.z321.cc.cd"
 
 # 站点名称，出现在 <title> 模板与页脚。
 name = "LiCore"

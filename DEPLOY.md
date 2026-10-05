@@ -127,7 +127,7 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `SITE_URL` | `http://licore.z321.cc.cd` | 站点规范地址 |
+| `SITE_URL` | `https://licore.z321.cc.cd` | 站点规范地址（**必须与线上协议一致**） |
 | `PORT` | `3000` | 监听端口 |
 | `HOST` | `127.0.0.1` | 监听地址（公网走 Nginx） |
 | `APP_DIR` | `/opt/licore-website` | 应用根目录 |
@@ -496,9 +496,9 @@ sudo systemctl restart licore-website
 curl -I http://127.0.0.1:3000/
 curl -s http://127.0.0.1:3000/api/status | head -c 400
 
-# 经域名访问
-curl -I http://licore.z321.cc.cd/
-curl -s http://licore.z321.cc.cd/sitemap.xml | head -20
+# 经域名访问（生产走 HTTPS；裸 http 会被 CDN 301 到 https）
+curl -I https://licore.z321.cc.cd/
+curl -s https://licore.z321.cc.cd/sitemap.xml | head -20
 ```
 
 逐项检查清单：
@@ -509,6 +509,8 @@ curl -s http://licore.z321.cc.cd/sitemap.xml | head -20
 - [ ] `/download` 有下载项
 - [ ] `/admin` 能登录（默认 `admin/admin`，**记得改密码**）
 - [ ] `/sitemap.xml` 里的域名正确（不是 `127.0.0.1`）
+- [ ] **canonical / `og:url` / sitemap 的协议与线上一致**（站点跑 HTTPS 就不能是 `http://`，
+      否则爬虫抓到的 https 页面读到的 canonical 指向 http，索引信号会被劈成两半）
 - [ ] `/api/status` 的 `upstream.reachable` 为 `true`
 - [ ] `/og.png` 能打开（分享图，`content-type: image/png`）
 - [ ] `/BingSiteAuth.xml` 能打开（Bing 验证文件）
@@ -520,8 +522,8 @@ curl -s http://licore.z321.cc.cd/sitemap.xml | head -20
 
 ```bash
 curl -s -o /dev/null -w 'og.png: %{http_code} %{content_type}\n' \
-  http://licore.z321.cc.cd/og.png
-curl -s http://licore.z321.cc.cd/BingSiteAuth.xml
+  https://licore.z321.cc.cd/og.png
+curl -s https://licore.z321.cc.cd/BingSiteAuth.xml
 ```
 
 `BingSiteAuth.xml` 应输出一段含验证码的 XML。两者都在 `public/` 下，

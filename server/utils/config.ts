@@ -61,7 +61,7 @@ export interface SiteConfig {
 /** 内置默认值。TOML 里缺失的字段一律回落到这里。 */
 const DEFAULTS: SiteConfig = {
   site: {
-    url: 'http://licore.z321.cc.cd',
+    url: 'https://licore.z321.cc.cd',
     name: 'LiCore',
     icp: '',
   },

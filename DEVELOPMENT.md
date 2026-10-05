@@ -1344,6 +1344,82 @@ PY
 > 这类朴素写法会漏判（CSS 里是 `.hover\:text-foreground`，冒号被转义），
 > 曾有版本因此误报「89 个类缺失」。用脚本里的转义逻辑判断才准。
 
+### 13.12 站点上了 HTTPS，但 canonical 还写着 http
+
+**症状**：站点经 CDN 把 `http://` 301 到 `https://`，页面实际都跑在 HTTPS 上，
+但线上每页的 `<link rel="canonical">`、`og:url`、`og:image`、`sitemap.xml` 的
+`<loc>`、`robots.txt` 的 Sitemap 行**全都写着 `http://`**。
+
+**为什么危害大**：canonical 是告诉搜索引擎「哪个 URL 才是正版」的指令。
+写成 http 等于在**每个页面上**声明正版是 http 版，而爬虫实际抓到的是 https 版 ——
+爬虫读到的 canonical 始终指向另一个地址，**索引信号被劈成两半**，
+或按 canonical 去抓 http 再吃一个 301，白耗抓取配额。
+`og:image` 写 http 还可能让部分不跟随跳转的社交抓取器放弃渲染大图卡片
+（同 §13.7.1 的 SVG 坑：静默退化，不报错）。
+
+**根因**：域名散落在**四处**，上线 HTTPS 时没有任何一处跟着改：
+
+| 位置 | 作用 |
+| --- | --- |
+| `app/config/site.ts` 的 `site.url` | 构建期默认值 |
+| `licore-site.toml` 的 `[site].url` | 运行时配置（优先级高于上面） |
+| `server/utils/config.ts` 的 `DEFAULTS.site.url` | TOML 缺失时的**兜底默认值** |
+| `public/robots.txt` 的 Sitemap 行 | **静态文件**，改配置不会自动更新它 |
+
+外加环境变量 `NUXT_PUBLIC_SITE_URL` 优先级最高（`nuxt.config.ts` 里
+`process.env.NUXT_PUBLIC_SITE_URL || site.url`）。**只改一两处必然漏。**
+
+**规则**：换域名或换协议时，这四处 + `robots.txt` 一起改，并跑一遍验证：
+
+```bash
+# 线上四类输出必须与实际协议一致（下面按 https 站举例）
+curl -s https://licore.z321.cc.cd/ | grep -oE 'rel="canonical" href="[^"]*"'
+curl -s https://licore.z321.cc.cd/ | grep -oE 'property="og:image"[^>]*'
+curl -s https://licore.z321.cc.cd/sitemap.xml | grep -oE '<loc>[^<]*</loc>' | head -3
+curl -s https://licore.z321.cc.cd/robots.txt | grep -i sitemap
+```
+
+### 13.13 sitemap 的 lastmod 不能是"当前时间"
+
+**症状**：`sitemap.xml` 里每条 URL 的 `<lastmod>` 都等于**你请求它的那一刻**，
+每次抓取都变。
+
+**为什么没用**：搜索引擎会识别并**忽略**这种"每次抓取都变"的 lastmod ——
+一个永远在变的时间戳不携带任何"内容何时变化"的信息。等于白写，
+甚至可能被判定为信号不可信。
+
+**两个错误写法**（都踩过）：
+
+1. `autoLastmod: true` —— 模块在**每次请求**打上当前时间。
+2. 把 `sitemap.urls` 写成**异步函数**去取真实时间 —— 模块会在**构建期
+   求值并序列化**进 `.output/server/chunks/virtual/global-sources.mjs`，
+   运行期根本不再调用，lastmod 定格在构建那一刻。（实测确认：
+   产物里 `urls` 是一份静态数组。）
+
+**正确写法**：用 `sitemap.sources` 指向**自己的 API 路由**，
+由模块在**每次请求 sitemap 时**通过 `event.$fetch` 拉取：
+
+```ts
+sitemap: {
+  autoLastmod: false,
+  sources: ['/api/sitemap-urls'],   // server/api/sitemap-urls.get.ts
+}
+```
+
+`/api/sitemap-urls` 从数据层取仓库 `pushed_at` 作为 lastmod
+（发行版、tag、提交都随它变）。
+
+**两条硬性要求**：
+
+- **上游不可达时省略 lastmod，绝不回退到当前时间** ——
+  缺失的值爬虫会自行判断，错误的值会被忽略甚至降权。
+- 验证时要**对比当前时间**，证明它不是 now：
+
+```bash
+curl -s http://127.0.0.1:3111/sitemap.xml | grep -oE '<lastmod>[^<]*</lastmod>' | head -1
+date -u +"now=%Y-%m-%dT%H:%M:%SZ"   # 两者应明显不同，且 lastmod 连续多次请求不变
+```
+
 ---
 
 ## 14. 测试与校验
@@ -1424,6 +1500,9 @@ curl -s http://127.0.0.1:3111/api/site-config
 - [ ] 没有给动态页面加预渲染（只有 `/docs` 允许，见 [§13.11③](#③-docs-构建期预渲染)）
 - [ ] 没有把 `buildDownloads()` 改回下发完整 `log.versions`（[§13.11②](#②-ssr-payload-按页裁剪)）
 - [ ] 页面上的 `fuxsto-design` 导入都是**真的用到了**（跳转按钮用 `LinkButton`）
+- [ ] 换域名/协议时，`site.ts` / `licore-site.toml` / `config.ts` 的 `DEFAULTS` / `robots.txt` **四处一起改**，并核对线上 canonical 与 og 字段（[§13.12](#1312-站点上了-https但-canonical-还写着-http)）
+- [ ] `sitemap.xml` 的 `lastmod` 不是"当前时间"，且连续请求保持稳定（[§13.13](#1313-sitemap-的-lastmod-不能是当前时间)）
+- [ ] 新增/修改的页面 `description` 在 **80 个汉字以内**（§10.6）
 
 ---
 

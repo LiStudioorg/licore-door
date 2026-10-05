@@ -155,7 +155,8 @@ sudo systemctl restart licore-website
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
 # 可选：覆盖站点域名（不设置则用 app/config/site.ts 里的默认值）
-NUXT_PUBLIC_SITE_URL=http://licore.z321.cc.cd
+# ⚠️ 必须与线上实际协议一致，否则 canonical 会与实际抓取的页面自相矛盾
+NUXT_PUBLIC_SITE_URL=https://licore.z321.cc.cd
 ```
 
 > `GITHUB_TOKEN` 只需要 **public repo 只读**权限（fine-grained token 勾选
@@ -345,7 +346,7 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 | --- | --- | --- |
 | `<title>` 模板 | `app/app.vue` | 子页面自动拼 `｜ LiCore`，首页用绝对标题 |
 | `meta description` | 各页面 `usePageSeo` | 每页独立撰写，且**动态包含最新版本号** |
-| `canonical` | `app/app.vue` + 各页 | 指向 `http://licore.z321.cc.cd/...`，响应式 |
+| `canonical` | `app/app.vue` + 各页 | 指向 `https://licore.z321.cc.cd/...`，响应式 |
 | Open Graph | 各页 `usePageSeo` | `og:title` / `og:description` / `og:url` + 分享图（含宽高、alt、type） |
 | Twitter Card | 各页 `usePageSeo` | `summary_large_image` + `/og.png`（1200×630） |
 | `hreflang` | `app/app.vue` | 单语言站点，声明 `zh-CN` |

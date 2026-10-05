@@ -73,7 +73,8 @@ const designGoals = [
 ]
 
 /* ---------------- SEO ---------------- */
-const description = `关于 LiCore：项目定位、设计取舍、更名历史与开源协议。LiCore 是 LiStudioorg 用 Go 编写的轻量级容器引擎，AGPL-3.0 开源，仓库位于 GitHub ${repo.slug}。`
+/** ⚠️ 控制在 80 个汉字以内，超出会被 Google 按像素截断（见 index.vue 的说明） */
+const description = `关于 LiCore：项目定位、设计取舍与更名历史。LiStudioorg 用 Go 编写的轻量级容器引擎，AGPL-3.0 开源。`
 
 usePageSeo(
   {

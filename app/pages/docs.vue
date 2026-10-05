@@ -61,8 +61,9 @@ async function copy(text: string, key: string) {  try {
 }
 
 /* ---------------- SEO ---------------- */
+/** ⚠️ 控制在 80 个汉字以内，超出会被 Google 按像素截断（见 index.vue 的说明） */
 const description =
-  'LiCore 使用文档：安装与编译、快速开始、完整命令参考、Boxfile 镜像构建、.licore 镜像格式、容器网络、卷管理、Hub 分发、Compose 编排、资源限制与开机自启。'
+  'LiCore 使用文档：安装编译、命令参考、Boxfile 构建、.licore 镜像格式、网络、卷、Hub 分发与资源限制。'
 
 usePageSeo(
   {
