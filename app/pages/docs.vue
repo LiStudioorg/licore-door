@@ -261,9 +261,9 @@ licore stats                                              # 实时查看容器�
                       { cmd: 'licore pull / push', desc: '从 Hub 拉取或推送镜像（也支持本地文件导入）' },
                       { cmd: 'licore login / search', desc: 'Hub 登录令牌与镜像搜索' },
                       { cmd: 'licore network', desc: '网络管理：ls / create / inspect / rm / connect' },
-                      { cmd: 'licore volume', desc: '卷管理：ls / create / inspect / rm' },
+                      { cmd: 'licore volume', desc: '卷管理：ls / create / inspect / rm（local / tmpfs / snapshot）' },
                       { cmd: 'licore compose', desc: '编排：up / down / ps / logs / scale / config' },
-                      { cmd: 'licore resource info', desc: '查看宿主机资源能力（cgroups 等）' },
+                      { cmd: 'licore resource info / update', desc: '查看宿主机资源能力，并动态调整运行中容器的限制' },
                       { cmd: 'licore stats', desc: '实时查看容器资源用量' },
                       { cmd: 'licore doctor', desc: '环境自检，含 Android 环境检查' },
                       { cmd: 'licore boot enable / disable / status', desc: '配置开机自启（无全局守护进程）' },
@@ -470,12 +470,30 @@ licore compose down</code></pre>
               CPU / 内存 / PID 限额内置于引擎，v0.6.0 起 cgroup 限额真正生效。
             </p>
             <div class="mt-4">
-              <pre class="code-block"><code>licore run --memory 256 demo:v1      # 内存上限（MiB）
-licore run --cpus 1.5 demo:v1        # CPU 配额
-licore run --pids-limit 100 demo:v1  # 进程数上限
-licore resource info                 # 查看宿主机支持的能力
-licore stats                         # 实时用量</code></pre>
+              <pre class="code-block"><code>licore run --memory 256 --memory-swap 512 demo:v1   # 内存（MiB，含软限制 --memory-reservation）
+licore run --cpus 2 --cpuset-cpus 0-3 demo:v1       # CPU 配额与绑核
+licore run --pids-limit 128 demo:v1                 # 进程数上限
+licore resource info                                # 查看宿主机支持的能力
+licore stats [容器ID]                                # 实时用量
+licore resource update 容器ID --memory 512           # 动态调整运行中容器的限制</code></pre>
             </div>
+            <div
+              class="mt-4 flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3.5 text-xs leading-5"
+            >
+              <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+              <p>
+                <strong class="text-foreground">默认无内存限额：</strong>
+                不指定 <code class="rounded bg-muted px-1 py-0.5">--memory</code> 时容器内存不受限，
+                容器可以把内存吃到触发宿主 OOM killer，从而杀死宿主上的其它进程
+                （<code class="rounded bg-muted px-1 py-0.5">--pids-limit</code> 同理默认不限）。
+                这是与 Docker 一致的<strong class="text-foreground">有意设计</strong> ——
+                擅自加默认值会破坏数据库、编译构建等合法的大内存负载，因此决定权留给用户。
+                <strong class="text-foreground">生产环境请显式指定 <code class="rounded bg-muted px-1 py-0.5">--memory</code>。</strong>
+              </p>
+            </div>
+            <p class="mt-3 text-xs text-muted-foreground">
+              资源限制在无权限或非 Linux 平台下应用失败时降级为告警，不阻断容器运行。
+            </p>
           </section>
 
           <!-- 容器权限隔离 -->
@@ -518,7 +536,15 @@ licore stats                         # 实时用量</code></pre>
                   </tr>
                   <tr class="border-t border-border">
                     <td class="whitespace-nowrap px-4 py-3 align-top"><code class="font-mono text-xs">seccomp 黑名单</code></td>
-                    <td class="px-4 py-3 text-muted-foreground">31 条危险系统调用返回 EPERM，纵深防御第二层</td>
+                    <td class="px-4 py-3 text-muted-foreground">
+                      33 条危险系统调用返回 <code class="rounded bg-muted px-1 py-0.5 text-xs">EPERM</code>，
+                      另 1 条按参数拦截。纵深防御第二层：<code class="rounded bg-muted px-1 py-0.5 text-xs">reboot</code> /
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">init_module</code> /
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">ptrace</code> /
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">mount</code> /
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">process_vm_readv</code> /
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">kcmp</code> 等
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -530,7 +556,35 @@ licore run --cap-drop NET_RAW myapp:v1                 # 从默认集移除
 licore run --cap-drop ALL --cap-add NET_BIND_SERVICE myapp:v1   # 清空后只留指定项</code></pre>
             </div>
             <p class="mt-3 text-xs text-muted-foreground">
-              能力名大小写不敏感，<code class="rounded bg-muted px-1 py-0.5">CAP_</code> 前缀可带可不带。
+              能力名大小写不敏感，<code class="rounded bg-muted px-1 py-0.5">CAP_</code> 前缀可带可不带，
+              默认能力集对应位图
+              <code class="rounded bg-muted px-1 py-0.5">CapEff=0x00000000a80425fb</code>。
+              <code class="rounded bg-muted px-1 py-0.5">--cap-add ALL</code> 可补齐全部已知能力。
+            </p>
+            <ul class="mt-4 space-y-2 text-sm leading-6 text-muted-foreground">
+              <li class="flex gap-2">
+                <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                <span>
+                  <strong class="text-foreground">exec 走容器内的只读 helper</strong>
+                  （<code class="rounded bg-muted px-1 py-0.5 text-xs">/.licore/exec-helper</code>，
+                  容器启动时由 LiCore 只读 bind 进去），由它做完与容器 init 相同的收口再执行用户命令。
+                </span>
+              </li>
+              <li class="flex gap-2">
+                <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                <span>
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">licore exec</code>
+                  <strong class="text-foreground">只允许进一步收紧能力</strong>：
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">--cap-drop</code> 可用，
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">--cap-add</code> 会被明确拒绝。
+                  需要更多能力请用 <code class="rounded bg-muted px-1 py-0.5 text-xs">licore run</code> 重新起容器。
+                </span>
+              </li>
+            </ul>
+            <p class="mt-4 text-sm leading-7 text-muted-foreground">
+              <strong class="text-foreground">已知缺口</strong>：没有 AppArmor / SELinux 强制策略；
+              seccomp 是<strong class="text-foreground">黑名单</strong>而非白名单，
+              因此不拦未知系统调用；容器与所有容器方案一样共享宿主内核，存在内核漏洞逃逸风险。
             </p>
           </section>
 
@@ -586,7 +640,7 @@ licore boot disable    # 取消自启</code></pre>
             <div class="mt-4">
               <pre class="code-block"><code>licore convert alpine:3.20 -o /tmp/alpine.licore   # 单个 → 文件
 licore convert nginx:1.27-alpine --import          # 单个 → 直接导入本地
-licore convert --from-file images.txt --output-dir ./dist/   # 批量
+licore convert --from-file images.txt --output-dir ./dist/   # 批量（支持 --jobs）
 licore run alpine:3.20 /bin/sh -c 'cat /etc/alpine-release'  # 转换后即可运行</code></pre>
             </div>
             <p class="mt-3 text-xs text-muted-foreground">
