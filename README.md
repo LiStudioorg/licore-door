@@ -22,11 +22,36 @@ LiCore 官方网站（[github.com/LiStudioorg/licore](https://github.com/LiStudi
 
 ### 1. 动态 SSR，不做静态生成
 
-站点以 `ssr: true` 运行，每次请求都由 Nitro 服务端渲染。
-这样做是因为版本数据是动态的 —— 静态预渲染会把数据固化在构建产物里，
+站点以 `ssr: true` 运行，页面的版本号、更新日志与下载链接都实时来自 GitHub，
+所以每次请求都由 Nitro 服务端渲染 —— 静态预渲染会把数据固化在构建产物里，
 上游一发新版就得重新构建部署。
 
-### 2. 服务端数据层（`server/utils/github.ts`）
+**唯一的例外是 `/docs`**：它的正文全部写死在页面里、不依赖任何上游数据，
+因此在构建期预渲染成静态页（顺带省掉每次请求的 SSR 开销）。
+
+> ⚠️ 除 `/docs` 外**不要给任何页面加预渲染** —— 那正是上面要避免的问题。
+> 详见 [DEVELOPMENT.md §13.11](./DEVELOPMENT.md#1311-首屏性能四个已做的优化与它们的护栏)。
+
+### 2. 首屏性能
+
+站点在保证数据实时性的前提下做过一轮加载优化，实测成效：
+
+| 项 | 优化前 | 优化后 |
+| --- | --- | --- |
+| 首页 HTML | 147 KB | **101 KB** |
+| 下载页 HTML | 220 KB | **86 KB** |
+| 全局 CSS | 143 KB（gzip 21.6 KB） | **104 KB（gzip 15.4 KB）** |
+| `/docs` 首字节 | 25 ms | **15.6 ms** |
+
+做法（细节与护栏见 [DEVELOPMENT.md §13.11](./DEVELOPMENT.md#1311-首屏性能四个已做的优化与它们的护栏)）：
+
+- **组件库样式按需生成** —— 不再整份引入组件库预先编译的 112 KB 样式，
+  只取它的设计令牌，让 Tailwind 按实际用到的类现场生成（收益最大）。
+- **SSR payload 按页裁剪** —— 页面只渲染几个字段，就不把整份版本明细塞进首屏。
+- **`/docs` 构建期预渲染**，静态页不再走 SSR。
+- **带哈希的静态资源长期强缓存**（`/_nuxt/**` 一年 `immutable`）。
+
+### 3. 服务端数据层（`server/utils/github.ts`）
 
 | 机制 | 说明 |
 | --- | --- |
@@ -41,7 +66,7 @@ Token 只在服务端使用，**不会进入客户端产物**。
 > TTL 的实际取值来自 `licore-site.toml` 的 `[github]` 段（不是硬编码），
 > 且是**运行时读取**的 —— 需要调缓存时长改配置即可。
 
-### 3. 更新日志与下载的自动适配（`server/utils/changelog.ts`）
+### 4. 更新日志与下载的自动适配（`server/utils/changelog.ts`）
 
 上游仓库当前的实际情况是：**有 17 个 git tag（v0.1.0 ~ v0.8.0），
 且已有 GitHub Release 与二进制产物**（v0.8.0 带 9 个平台归档）。
@@ -58,7 +83,7 @@ Token 只在服务端使用，**不会进入客户端产物**。
 > 就自动切换成了官方二进制下载 —— 实测 `/api/downloads` 返回
 > `mode: release-assets`，全程无需改代码。
 
-### 4. 配置系统（`server/utils/config.ts`）
+### 5. 配置系统（`server/utils/config.ts`）
 
 站点配置在 `licore-site.toml`，运行时读取，**可热重载**：
 
@@ -344,7 +369,9 @@ curl -fsSL https://raw.githubusercontent.com/LiStudioorg/licore-door/main/deploy
 ├── app/
 │   ├── app.vue                 # 根组件：全局 SEO 模板、JSON-LD 兜底、主题初始化
 │   ├── error.vue               # 404 / 500 页面
-│   ├── assets/css/main.css     # Tailwind v4 + fuxsto-design 样式入口
+│   ├── assets/css/
+│   │   ├── main.css            # 样式入口：Tailwind v4 + 站点令牌 + 组件类
+│   │   └── fuxsto-theme.css    # 从组件库摘出的设计令牌（升级库时需重摘）
 │   ├── components/
 │   │   ├── SiteHeader.vue      # 顶栏导航 + 主题切换
 │   │   ├── SiteFooter.vue      # 页脚
@@ -424,6 +451,8 @@ curl http://127.0.0.1:3000/api/status
 | 面板上「配置编辑」整块不见 / 保存报 403 | `admin.allowConfigEdit = false`。改成 `true` 后重启服务 |
 | 保存配置提示「改写后的配置无法解析」 | 服务**拒绝了这次写入，原文件未被改动**。多半是文件被手工改成了非法 TOML，先修语法 |
 | 改完配置想还原 | 用同目录的 `licore-site.toml.bak`（最近一次面板保存前的版本）覆盖回去，再重启 |
+| 改了页面文案，刷新却还是旧的 | `/docs` 有最长 5 分钟的浏览器缓存（`max-age=300`）。换浏览器或 `Ctrl+Shift+R` 强刷 |
+| 按钮/卡片看着"没样式"了 | 十有八九是动过样式入口或升级了组件库，导致 Tailwind 少生成了工具类。跑 [DEVELOPMENT §13.11](./DEVELOPMENT.md#1311-首屏性能四个已做的优化与它们的护栏) 末尾的「渲染类覆盖检查」，应为缺失 0 |
 
 > ℹ️ 面板里保存配置**立即生效**（服务会热重载），不需要重启；
 > 但用**编辑器手改** `licore-site.toml` 后仍然要重启服务才生效。
@@ -471,10 +500,10 @@ GITHUB_CACHE_TTL_SECONDS=5 npm run dev
 
 | 组件 | 版本 | 用途 |
 | --- | --- | --- |
-| Nuxt | 4.5.x | SSR 框架 |
+| Nuxt | 4.5.x | SSR 框架（仅 `/docs` 预渲染） |
 | Vue | 3.5.x | 视图层 |
 | Nitro | 2.13.x | 服务端运行时 |
-| Tailwind CSS | 4.x | 原子化样式 |
+| Tailwind CSS | 4.x | 原子化样式（`@source` 扫描组件库，按需生成） |
 | fuxsto-design | 1.0.5 | Vue 3 组件库（单色 zinc 设计语言） |
 | lucide-vue-next | 0.577.x | 图标 |
 | smol-toml | 1.9.x | TOML 配置解析（零依赖） |

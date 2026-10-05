@@ -62,6 +62,16 @@ Nitro SSR 服务（Node 22+，单进程）
 > 这条约束不是"最佳实践建议"，是**硬性要求**。违反它的后果见
 > [§13 踩过的坑](#13-踩过的坑)。
 
+**唯一的例外：`/docs` 是构建期预渲染的静态页。**
+它的正文全部写死在 `docs.vue` 里、不依赖任何上游数据，所以预渲染不会带来
+"数据固化成旧值"的问题，还能省掉每次请求的 SSR 开销。
+
+> ⚠️ 除 `/docs` 外**任何页面都不要预渲染**。其余页面（`/` `/changelog`
+> `/download` `/about`）的版本号、更新日志、下载链接都实时来自 GitHub，
+> 预渲染会把它们固化进构建产物 —— 上游发新版就得重新部署，
+> 直接违背本站的设计初衷。详见
+> [§13.11③](#③-docs-构建期预渲染)。
+
 ---
 
 ## 2. 一次请求的完整链路
@@ -101,7 +111,9 @@ Nitro SSR 服务（Node 22+，单进程）
 app/                          # 前端（会被打进客户端 bundle）
 ├── app.vue                   # 根组件：全局 head、canonical、JSON-LD 兜底、主题初始化
 ├── error.vue                 # 错误页（4xx/5xx）
-├── assets/css/main.css       # Tailwind 入口 + 设计令牌
+├── assets/css/
+│   ├── main.css              # ★ 样式入口：tailwindcss + 站点令牌 + 组件类（见 §11）
+│   └── fuxsto-theme.css      # ★ 从组件库摘出的编译期指令（勿手改，升级库时重摘）
 ├── components/
 │   ├── SiteHeader.vue        # 顶栏 + 移动端菜单 + 主题切换
 │   ├── SiteFooter.vue        # 页脚
@@ -830,7 +842,7 @@ curl -s http://127.0.0.1:3000/ | grep -o 'name="description" content="[^"]*"' \
 
 ## 11. 样式与设计系统
 
-- **Tailwind 4**，通过 `@tailwindcss/vite` 插件接入，配置在
+- **Tailwind 4**，通过 `@tailwindcss/vite` 插件接入，站点令牌写在
   `app/assets/css/main.css` 的 `@theme` 块里（Tailwind 4 不再用
   `tailwind.config.js`）。
 - **`fuxsto-design`** 提供组件（Button / Card / Chip / Badge / Input 等）。
@@ -839,8 +851,40 @@ curl -s http://127.0.0.1:3000/ | grep -o 'name="description" content="[^"]*"' \
 - 自定义组件走自动导入（`components: [{ path: '~/components', pathPrefix: false }]`），
   因为 `pathPrefix: false`，用 `<LinkButton>` 而不是 `<ComponentsLinkButton>`。
 
+### 11.1 样式入口：三个文件，各管一件事
+
+| 文件 | 作用 |
+| --- | --- |
+| `app/assets/css/main.css` | 站点样式入口：`@import 'tailwindcss'`、站点 `@theme` 令牌、base/components 层 |
+| `app/assets/css/fuxsto-theme.css` | 从组件库产物里摘出的 **Tailwind 编译期指令**（`@theme` 令牌 + `@custom-variant dark`），1.4 KB |
+| `node_modules/fuxsto-design/dist` | 被 `@source` 扫描，用于**按需生成**库组件用到的工具类 |
+
+```css
+/* app/assets/css/main.css 顶部 */
+@import 'tailwindcss';
+@import './fuxsto-theme.css';
+@source '../../../node_modules/fuxsto-design/dist';
+```
+
+> ⚠️ **不要改回 `@import 'fuxsto-design/styles'`。** 那是库预先编译好的
+> 112 KB 产物，会整份搬进产物 CSS；本站只用 6 个组件，实测约 55% 从未被
+> 任何页面用到，却阻塞首屏。完整来龙去脉与实测数据见
+> [§13.11①](#1311-首屏性能四个已做的优化与它们的护栏)。
+>
+> ⚠️ `@source` 是 **3 层 `../`**。层数写错时 Tailwind **不报错**，只是静默
+> 少生成样式，改完必须跑 §13.11 末尾的渲染类覆盖检查。
+>
+> ⚠️ `fuxsto-theme.css` 是从 `node_modules` 摘出来的（库没有单独发布这个入口）。
+> **升级 `fuxsto-design` 后若令牌有变化，需要重新摘一次。**
+
+### 11.2 写样式的约定
+
 设计令牌用语义化 CSS 变量（`bg-background`、`text-muted-foreground`、
 `border-border` 等），**不要写死颜色值**，否则暗色模式会失效。
+
+站点的通用类（`.site-container` / `.hero-glow` / `.grid-pattern` / `.lift` /
+`.code-block` / `.timeline-rail` / `.prose-licore`）都定义在 `main.css` 的
+`@layer components` 与文件末尾，新增通用类请放这里而不是散在各个页面里。
 
 ---
 
@@ -957,7 +1001,7 @@ rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png
 ### 改下载项的展示逻辑
 
 `server/utils/changelog.ts` 的 `buildDownloads()`。它会根据 Release
-有没有二进制资产自动决定展示什么，改之前先读 [§4.2](#42-serverutilschangelogts--业务聚合)。
+有没有二进制资产自动决定展示什么，改之前先读 [§4.2](#42-serverutilschangelogts-业务聚合)。
 
 ---
 
@@ -1060,7 +1104,7 @@ html.replace(/\n{2,}/g, '</p><p>').replace(/^(?!<[huop])/gm, '<p>')
 
 未捕获的上游错误会被 Nitro 记成 `[request error] [unhandled]` 并返回 500，
 日志堆栈看起来像应用崩溃。所有公开 API 路由都必须用
-`upstreamUnavailable()` 降级为 503。见 [§4.3](#43-serverutilsupstreamts--失败降级)。
+`upstreamUnavailable()` 降级为 503。见 [§4.3](#43-serverutilsupstreamts-失败降级)。
 
 ### 13.7 API 路由文件名的后缀
 
@@ -1371,8 +1415,8 @@ curl -s http://127.0.0.1:3111/api/site-config
 - [ ] 没有在同一个 setup 的另一个 `useAsyncData` loader 里读 `xxx.value`（[§13.10](#1310-在同一次-setup-里读另一个-useasyncdata-的值会拿到-undefined)）
 - [ ] 改配置相关代码后，**重新构建并重启测试进程**再验证（否则测的是旧代码，见 MAINTENANCE §6）
 - [ ] 动了 CSS 引入方式 / 升级 `fuxsto-design` 后，跑过「渲染类覆盖检查」且缺失为 0（[§13.11](#1311-首屏性能四个已做的优化与它们的护栏)）
-- [ ] 没有给动态页面加预渲染（只有 `/docs` 允许，见 [§13.11③](#-docs-构建期预渲染)）
-- [ ] 没有把 `buildDownloads()` 改回下发完整 `log.versions`（[§13.11②](#-ssr-payload-按页裁剪)）
+- [ ] 没有给动态页面加预渲染（只有 `/docs` 允许，见 [§13.11③](#③-docs-构建期预渲染)）
+- [ ] 没有把 `buildDownloads()` 改回下发完整 `log.versions`（[§13.11②](#②-ssr-payload-按页裁剪)）
 - [ ] 页面上的 `fuxsto-design` 导入都是**真的用到了**（跳转按钮用 `LinkButton`）
 
 ---
