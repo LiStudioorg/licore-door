@@ -76,6 +76,33 @@ export const repo = {
   formerNames: ['boxli'],
 } as const
 
+/**
+ * 上游仓库 main 分支的 raw 直链前缀。
+ * 由 repo.url 推导而非另写一份域名，换仓库时只需改上面的 owner/name。
+ */
+export const rawBaseUrl = repo.url.replace(
+  'https://github.com/',
+  'https://raw.githubusercontent.com/',
+)
+
+/**
+ * 一行安装脚本的绝对地址 —— **当前最主要的安装方式**。
+ *
+ * 上游 README《安装》把它列为「方式一（推荐）」：脚本自动检测系统与架构、
+ * 下载对应归档并校验 SHA256 后安装。首页 / 下载页 / 文档页三处都展示它，
+ * 因此地址只在收敛在此一处，避免各页面各写一份而漂移。
+ *
+ * 脚本行为约定见上游 scripts/install.sh：平台不支持、校验失败、目标已存在等
+ * 情况一律明确报错并停止，不静默降级。
+ */
+export const installScriptUrl = `${rawBaseUrl}/main/scripts/install.sh`
+
+/**
+ * 一行安装命令（可直接复制到终端）。
+ * 装上到用户目录、无需 root 的变体见文档页。
+ */
+export const installCommand = `curl -fsSL ${installScriptUrl} | sudo bash`
+
 /** 页面级导航 */
 export const navLinks = [
   { label: '首页', to: '/' },

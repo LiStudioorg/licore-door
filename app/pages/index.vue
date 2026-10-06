@@ -16,7 +16,7 @@ import {
   ExternalLink,
   CheckCircle2,
 } from 'lucide-vue-next'
-import { repo, site } from '~/config/site'
+import { repo, site, installCommand } from '~/config/site'
 import type { ChangelogPayload } from '~~/server/utils/changelog'
 import type { GitHubCommit, RepoMeta } from '~~/server/utils/github'
 
@@ -256,7 +256,10 @@ const features = [
   },
 ]
 
-const quickstart = `# 构建镜像并自动导入本地
+const quickstart = `# 安装（推荐：自动检测系统与架构，下载并校验后安装）
+${installCommand}
+
+# 构建镜像并自动导入本地
 licore build -t demo:v1 .
 
 # 端口映射 + 卷挂载 + 内存限制（MiB）
@@ -553,7 +556,7 @@ const TYPE_COLORS: Record<string, string> = {
           <div class="hero-glow absolute inset-0 -z-10" aria-hidden="true" />
           <h2 class="text-3xl font-bold tracking-tight">开始使用 LiCore</h2>
           <p class="mx-auto mt-4 max-w-xl text-sm leading-7 text-muted-foreground">
-            下载适合你平台的构建产物，或直接从源码编译。
+            一条安装命令装好，或下载适合你平台的构建产物。
             全部版本与下载链接均自动同步自 GitHub 仓库。
           </p>
           <div class="mt-8 flex flex-wrap items-center justify-center gap-3">

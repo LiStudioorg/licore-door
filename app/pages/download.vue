@@ -14,7 +14,7 @@ import {
   Check,
   Package,
 } from 'lucide-vue-next'
-import { repo, site, buildMatrix } from '~/config/site'
+import { repo, site, buildMatrix, installCommand, installScriptUrl } from '~/config/site'
 import type { ChangelogPayload, VersionEntry, VersionSummary } from '~~/server/utils/changelog'
 import type { RepoMeta } from '~~/server/utils/github'
 
@@ -132,8 +132,8 @@ const platformList = [...new Set(binaries.map((b) => b.os))]
 const platforms =
   platformList.length > 3 ? `${platformList.slice(0, 3).join(' / ')} 等` : platformList.join(' / ')
 const description = hasBinaries
-  ? `下载 LiCore ${latest?.version} 官方构建产物，支持 ${platforms}，链接自动同步自 GitHub Release。`
-  : `下载 LiCore ${latest?.version ?? '最新版'}：官方源码归档与本地编译指引（Linux amd64/arm64、Android arm64）。`
+  ? `一条命令安装 LiCore ${latest?.version}，或下载官方构建产物（支持 ${platforms}），链接同步自 GitHub Release。`
+  : `安装 LiCore ${latest?.version ?? '最新版'}：一行安装命令，或下载官方源码归档（Linux amd64/arm64、Android arm64）。`
 
 usePageSeo(
   {
@@ -208,6 +208,45 @@ useHead({
       </div>
     </section>
 
+    <!-- ============ 一行命令安装（最主要的安装方式） ============ -->
+    <section class="border-b border-border bg-muted/30">
+      <div class="site-container py-10">
+        <div class="flex flex-wrap items-center gap-2">
+          <h2 class="text-xl font-bold tracking-tight">一条命令安装</h2>
+          <Badge variant="primary" size="sm">推荐</Badge>
+        </div>
+        <p class="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">
+          这是目前<strong class="text-foreground">最主要的安装方式</strong>：
+          脚本自动检测系统与架构，下载对应归档、校验 SHA256 后安装到
+          <code class="rounded bg-muted px-1.5 py-0.5 text-xs">/usr/local/bin</code>。
+          下方的平台二进制与源码构建是备选路径。
+        </p>
+
+        <div class="relative mt-5 max-w-3xl">
+          <pre class="code-block pr-12"><code>{{ installCommand }}</code></pre>
+          <button
+            type="button"
+            class="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-label="复制安装命令"
+            @click="copy(installCommand, 'install')"
+          >
+            <Check v-if="copied === 'install'" class="size-3.5 text-primary" />
+            <Copy v-else class="size-3.5" />
+          </button>
+        </div>
+
+        <p class="mt-3 text-xs leading-5 text-muted-foreground">
+          装到用户目录（无需 root）：
+          <code class="rounded bg-muted px-1 py-0.5">bash -s -- --prefix "$HOME/.local/bin"</code>；
+          其余选项（<code class="rounded bg-muted px-1 py-0.5">--version</code> /
+          <code class="rounded bg-muted px-1 py-0.5">--dry-run</code> /
+          <code class="rounded bg-muted px-1 py-0.5">--force</code>）见
+          <NuxtLink to="/docs#install" class="text-primary underline underline-offset-4">安装文档</NuxtLink>
+          —— 脚本在平台不支持、校验失败、目标已存在时一律明确报错并停止，不静默降级。
+        </p>
+      </div>
+    </section>
+
     <div class="site-container py-12">
       <!-- 上游无二进制时的高亮提示 -->
       <div
@@ -242,7 +281,7 @@ useHead({
           <section aria-labelledby="downloads-heading">
             <div class="flex flex-wrap items-end justify-between gap-4">
               <h2 id="downloads-heading" class="text-xl font-bold tracking-tight">
-                {{ hasBinaries ? '选择你的平台' : '下载源码' }}
+                {{ hasBinaries ? '按平台手动下载' : '下载源码' }}
               </h2>
 
               <label class="flex items-center gap-2 text-sm">
@@ -314,7 +353,7 @@ useHead({
 
           <!-- 构建矩阵 -->
           <section aria-labelledby="matrix-heading">
-            <h2 id="matrix-heading" class="text-xl font-bold tracking-tight">构建矩阵</h2>
+            <h2 id="matrix-heading" class="text-xl font-bold tracking-tight">构建矩阵（备选）</h2>
             <p class="mt-3 text-sm leading-7 text-muted-foreground">
               上游 Makefile 可交叉编译下列目标。全部是 <code class="rounded bg-muted px-1.5 py-0.5 text-xs">CGO_ENABLED=0</code>
               的纯 Go 产物，<strong class="text-foreground">不需要任何 C 工具链或 NDK</strong>。
@@ -352,7 +391,7 @@ useHead({
 
           <!-- 从源码构建 -->
           <section aria-labelledby="build-heading">
-            <h2 id="build-heading" class="text-xl font-bold tracking-tight">从源码构建</h2>
+            <h2 id="build-heading" class="text-xl font-bold tracking-tight">从源码构建（备选）</h2>
 
             <ol class="mt-6 space-y-6">
               <li v-for="(step, i) in buildSteps" :key="step.title" class="flex gap-4">
@@ -477,12 +516,16 @@ useHead({
                 <Github class="mr-1.5 size-3.5" />
                 克隆源码仓库
               </LinkButton>
+              <LinkButton href="/docs#install" variant="ghost" size="sm" class="w-full">
+                安装文档
+              </LinkButton>
               <LinkButton href="/changelog" variant="ghost" size="sm" class="w-full">
                 查看全部版本
               </LinkButton>
             </div>
             <p class="mt-4 text-xs leading-5 text-muted-foreground">
-              LiCore 目前未发布到任何包管理器，唯一的官方分发渠道是 GitHub 仓库。
+              推荐用上方的一行命令安装；LiCore 目前未发布到任何包管理器，
+              官方分发渠道是 GitHub 仓库。
             </p>
           </Card>
 

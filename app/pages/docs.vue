@@ -17,7 +17,7 @@ import {
   Check,
   ExternalLink,
 } from 'lucide-vue-next'
-import { repo, site } from '~/config/site'
+import { installCommand, installScriptUrl, repo, site } from '~/config/site'
 
 const sections = [
   { id: 'install', label: '安装' },
@@ -52,10 +52,13 @@ const imagePrinciples = [
   },
 ]
 
-/** 上游仓库的 raw 直链前缀（与 repo.url 同源，避免页面上再写一遍域名） */
-const rawBase = repo.url.replace('https://github.com/', 'https://raw.githubusercontent.com/')
-/** 一行安装脚本的绝对地址，模板与复制按钮共用一处 */
-const installScriptUrl = `${rawBase}/main/scripts/install.sh`
+/** 一行安装命令（最主要安装方式）与脚本选项，均来自 app/config/site.ts 的统一常量 */
+const installScriptOptions = [
+  { opt: '--version <TAG>', desc: '指定版本，如 --version v0.7.0（默认取最新 Release）' },
+  { opt: '--prefix <DIR>', desc: '安装目录，默认 /usr/local/bin' },
+  { opt: '--dry-run', desc: '只显示将执行的操作，不下载、不写入' },
+  { opt: '--force', desc: '目标已存在时覆盖（默认拒绝覆盖）' },
+]
 
 const copied = ref('')
 async function copy(text: string, key: string) {  try {
@@ -172,30 +175,23 @@ useHead({
               安装
             </h2>
             <p class="mt-4 text-sm leading-7 text-muted-foreground">
-              LiCore 是单二进制程序，没有运行时依赖注入 —— 安装无非是把一个可执行文件放进
+              一条命令装好 —— 这是目前
+              <strong class="text-foreground">最主要的安装方式</strong>：
+              脚本自动检测系统与架构，下载对应归档、校验 SHA256 后安装到
+              <code class="rounded bg-muted px-1.5 py-0.5 text-xs">/usr/local/bin</code>。
+              也可以从<NuxtLink to="/download" class="text-primary underline underline-offset-4">下载页</NuxtLink>
+              取二进制手动放置，或从源码编译；LiCore 是单二进制程序，
+              安装无非是把一个可执行文件放进
               <code class="rounded bg-muted px-1.5 py-0.5 text-xs">PATH</code>。
-              可以从<NuxtLink to="/download" class="text-primary underline underline-offset-4">下载页</NuxtLink>
-              取二进制、用上游的一行安装脚本，或从源码编译。
             </p>
-            <div class="relative mt-4">
-              <pre class="code-block"><code># 方式一：一行命令（自动检测系统与架构，下载归档并校验后安装）
-curl -fsSL {{ installScriptUrl }} | sudo bash
+
+            <div class="relative mt-5">
+              <pre class="code-block"><code># 一行命令安装（推荐）—— 自动检测系统与架构、下载并校验后安装
+{{ installCommand }}
 
 # 装到用户目录（无需 root）
 curl -fsSL {{ installScriptUrl }} \
   | bash -s -- --prefix "$HOME/.local/bin"
-
-# 方式二：源码编译并安装到 /usr/local/bin
-git clone {{ repo.url }}.git
-cd licore
-make all            # 默认构建 linux/amd64、linux/arm64、android/arm64
-sudo make install
-
-# 需要指定版本号时可注入（可选，不写则由构建脚本决定）
-make VERSION=1.2.3 all
-
-# 方式三：已拿到二进制，手动放置
-install -m 0755 licore-linux-amd64 /usr/local/bin/licore
 
 # 验证
 licore --version</code></pre>
@@ -203,28 +199,25 @@ licore --version</code></pre>
                 type="button"
                 class="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                 aria-label="复制安装命令"
-                @click="copy(`curl -fsSL ${installScriptUrl} | sudo bash`, 'install')"
+                @click="copy(installCommand, 'install')"
               >
                 <Check v-if="copied === 'install'" class="size-3.5 text-primary" />
                 <Copy v-else class="size-3.5" />
               </button>
             </div>
+
+            <h3 class="mt-8 text-base font-semibold">安装脚本选项</h3>
             <div class="mt-4 overflow-hidden rounded-xl border border-border">
               <table class="w-full text-sm">
                 <thead class="bg-muted/50">
                   <tr>
-                    <th scope="col" class="px-4 py-3 text-left font-medium">安装脚本选项</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">选项</th>
                     <th scope="col" class="px-4 py-3 text-left font-medium">说明</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr
-                    v-for="o in [
-                      { opt: '--version <TAG>', desc: '指定版本，如 --version v0.7.0（默认取最新 Release）' },
-                      { opt: '--prefix <DIR>', desc: '安装目录，默认 /usr/local/bin' },
-                      { opt: '--dry-run', desc: '只显示将执行的操作，不下载、不写入' },
-                      { opt: '--force', desc: '目标已存在时覆盖（默认拒绝覆盖）' },
-                    ]"
+                    v-for="o in installScriptOptions"
                     :key="o.opt"
                     class="border-t border-border"
                   >
@@ -245,6 +238,21 @@ licore --version</code></pre>
               <code class="rounded bg-muted px-1 py-0.5">4</code> 校验失败、
               <code class="rounded bg-muted px-1 py-0.5">5</code> 权限不足。
             </p>
+
+            <h3 class="mt-8 text-base font-semibold">其他安装方式</h3>
+            <div class="relative mt-4">
+              <pre class="code-block"><code># 方式二：源码编译并安装到 /usr/local/bin
+git clone {{ repo.url }}.git
+cd licore
+make all            # 默认构建 linux/amd64、linux/arm64、android/arm64
+sudo make install
+
+# 需要指定版本号时可注入（可选，不写则由构建脚本决定）
+make VERSION=1.2.3 all
+
+# 方式三：已拿到二进制，手动放置
+install -m 0755 licore-linux-amd64 /usr/local/bin/licore</code></pre>
+            </div>
           </section>
 
           <!-- 快速开始 -->
