@@ -30,7 +30,9 @@ const sections = [
   { id: 'hub', label: 'Hub 分发' },
   { id: 'compose', label: 'Compose 编排' },
   { id: 'limits', label: '资源限制' },
+  { id: 'isolation', label: '权限隔离' },
   { id: 'boot', label: '开机自启' },
+  { id: 'platform', label: '支持平台' },
   { id: 'compat', label: '兼容性说明' },
 ]
 
@@ -50,6 +52,11 @@ const imagePrinciples = [
   },
 ]
 
+/** 上游仓库的 raw 直链前缀（与 repo.url 同源，避免页面上再写一遍域名） */
+const rawBase = repo.url.replace('https://github.com/', 'https://raw.githubusercontent.com/')
+/** 一行安装脚本的绝对地址，模板与复制按钮共用一处 */
+const installScriptUrl = `${rawBase}/main/scripts/install.sh`
+
 const copied = ref('')
 async function copy(text: string, key: string) {  try {
     await navigator.clipboard.writeText(text)
@@ -63,7 +70,7 @@ async function copy(text: string, key: string) {  try {
 /* ---------------- SEO ---------------- */
 /** ⚠️ 控制在 80 个汉字以内，超出会被 Google 按像素截断（见 index.vue 的说明） */
 const description =
-  'LiCore 使用文档：安装编译、命令参考、Boxfile 构建、.licore 镜像格式、网络、卷、Hub 分发与资源限制。'
+  'LiCore 使用文档：安装、命令参考、Boxfile 构建、.licore 镜像格式、网络、卷、Hub 分发、资源限制与权限隔离。'
 
 usePageSeo(
   {
@@ -165,12 +172,20 @@ useHead({
               安装
             </h2>
             <p class="mt-4 text-sm leading-7 text-muted-foreground">
-              LiCore 是单二进制程序，没有安装器也没有依赖注入。
-              从<NuxtLink to="/download" class="text-primary underline underline-offset-4">下载页</NuxtLink>
-              获取对应平台的二进制，或从源码编译，然后放进 <code class="rounded bg-muted px-1.5 py-0.5 text-xs">PATH</code> 即可。
+              LiCore 是单二进制程序，没有运行时依赖注入 —— 安装无非是把一个可执行文件放进
+              <code class="rounded bg-muted px-1.5 py-0.5 text-xs">PATH</code>。
+              可以从<NuxtLink to="/download" class="text-primary underline underline-offset-4">下载页</NuxtLink>
+              取二进制、用上游的一行安装脚本，或从源码编译。
             </p>
             <div class="relative mt-4">
-              <pre class="code-block"><code># 方式一：源码编译并安装到 /usr/local/bin
+              <pre class="code-block"><code># 方式一：一行命令（自动检测系统与架构，下载归档并校验后安装）
+curl -fsSL {{ installScriptUrl }} | sudo bash
+
+# 装到用户目录（无需 root）
+curl -fsSL {{ installScriptUrl }} \
+  | bash -s -- --prefix "$HOME/.local/bin"
+
+# 方式二：源码编译并安装到 /usr/local/bin
 git clone {{ repo.url }}.git
 cd licore
 make all            # 默认构建 linux/amd64、linux/arm64、android/arm64
@@ -179,7 +194,7 @@ sudo make install
 # 需要指定版本号时可注入（可选，不写则由构建脚本决定）
 make VERSION=1.2.3 all
 
-# 方式二：已拿到二进制，手动放置
+# 方式三：已拿到二进制，手动放置
 install -m 0755 licore-linux-amd64 /usr/local/bin/licore
 
 # 验证
@@ -188,12 +203,48 @@ licore --version</code></pre>
                 type="button"
                 class="absolute right-2 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                 aria-label="复制安装命令"
-                @click="copy(`git clone ${repo.url}.git && cd licore && make all && sudo make install`, 'install')"
+                @click="copy(`curl -fsSL ${installScriptUrl} | sudo bash`, 'install')"
               >
                 <Check v-if="copied === 'install'" class="size-3.5 text-primary" />
                 <Copy v-else class="size-3.5" />
               </button>
             </div>
+            <div class="mt-4 overflow-hidden rounded-xl border border-border">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/50">
+                  <tr>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">安装脚本选项</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="o in [
+                      { opt: '--version <TAG>', desc: '指定版本，如 --version v0.7.0（默认取最新 Release）' },
+                      { opt: '--prefix <DIR>', desc: '安装目录，默认 /usr/local/bin' },
+                      { opt: '--dry-run', desc: '只显示将执行的操作，不下载、不写入' },
+                      { opt: '--force', desc: '目标已存在时覆盖（默认拒绝覆盖）' },
+                    ]"
+                    :key="o.opt"
+                    class="border-t border-border"
+                  >
+                    <td class="whitespace-nowrap px-4 py-3 align-top">
+                      <code class="font-mono text-xs">{{ o.opt }}</code>
+                    </td>
+                    <td class="px-4 py-3 text-muted-foreground">{{ o.desc }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="mt-3 text-xs leading-5 text-muted-foreground">
+              脚本的平台不支持、校验失败、目标已存在等情况一律明确报错并停止，不静默降级；
+              也不会改写你的 <code class="rounded bg-muted px-1 py-0.5">.bashrc</code> /
+              <code class="rounded bg-muted px-1 py-0.5">.zshrc</code>。
+              退出码：<code class="rounded bg-muted px-1 py-0.5">2</code> 用法错误、
+              <code class="rounded bg-muted px-1 py-0.5">3</code> 平台不支持、
+              <code class="rounded bg-muted px-1 py-0.5">4</code> 校验失败、
+              <code class="rounded bg-muted px-1 py-0.5">5</code> 权限不足。
+            </p>
           </section>
 
           <!-- 快速开始 -->
@@ -335,6 +386,30 @@ licore images                                      # 确认 demo:v1 已导入</c
                   远程 <code class="rounded bg-muted px-1 py-0.5 text-xs">ADD</code>）与资源能力会显式报错，不假装成功。
                 </span>
               </li>
+              <li class="flex gap-2">
+                <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                <span>
+                  <strong class="text-foreground">
+                    <code class="rounded bg-muted px-1 py-0.5 text-xs">COPY . /</code> 会被明确拒绝
+                  </strong>
+                  —— 这是有意的安全策略，不是缺陷：它会把构建上下文里的一切
+                  （<code class="rounded bg-muted px-1 py-0.5 text-xs">.git/</code>、密钥、
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">node_modules/</code>、编辑器临时文件）
+                  无差别打进镜像层，是容器镜像最常见的凭据泄漏来源。要复制整个上下文，就按顶层目录逐个写
+                  （<code class="rounded bg-muted px-1 py-0.5 text-xs">COPY bin /bin</code>、
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">COPY etc /etc</code> …）。
+                </span>
+              </li>
+              <li class="flex gap-2">
+                <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                <span>
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">--arch</code> /
+                  <code class="rounded bg-muted px-1 py-0.5 text-xs">--os</code>
+                  可覆盖产物平台字段（<code class="rounded bg-muted px-1 py-0.5 text-xs">--arch</code> 可选
+                  amd64 / arm64 / arm / 386 / riscv64 / loong64），留空跟随宿主；
+                  交叉构建的产物会跳过平台匹配检查并正常导入本地。
+                </span>
+              </li>
             </ul>
           </section>
 
@@ -414,7 +489,8 @@ licore run -v data:/data:ro myapp:v1      # 只读挂载（v0.6.0 落地）
 licore volume ls / create / inspect / rm</code></pre>
             </div>
             <p class="mt-3 text-xs leading-5 text-muted-foreground">
-              卷驱动支持 volume / tmpfs / snapshot，并带配额能力。
+              卷驱动支持 local / tmpfs / snapshot，并支持 <code class="rounded bg-muted px-1 py-0.5">:ro</code>
+              只读挂载与配额能力。
             </p>
           </section>
 
@@ -515,8 +591,10 @@ licore resource update 容器ID --memory 512           # 动态调整运行中�
               </span>
             </div>
             <p class="mt-4 text-sm leading-7 text-muted-foreground">
-              v0.8.0 起默认启用三层防护。这三层<strong class="text-foreground">尚未在真机验证</strong>，
-              在自行确认之前仍不建议用 LiCore 运行不可信镜像。
+              v0.8.0 起默认启用多层防护；<strong class="text-foreground">v0.9.5 起隔离已在真机验证</strong>
+              （含 3 条 P0 宿主逃逸路径的修复）。验证记录与逐条攻击面判定见上游
+              <code class="rounded bg-muted px-1 py-0.5 text-xs">docs/escape-audit.md</code>，
+              尚未覆盖的项见 <code class="rounded bg-muted px-1 py-0.5 text-xs">docs/unverified.md</code>。
             </p>
             <div class="mt-4 overflow-hidden rounded-xl border border-border">
               <table class="w-full text-sm">
@@ -545,6 +623,28 @@ licore resource update 容器ID --memory 512           # 动态调整运行中�
                       <code class="rounded bg-muted px-1 py-0.5 text-xs">mount</code> /
                       <code class="rounded bg-muted px-1 py-0.5 text-xs">process_vm_readv</code> /
                       <code class="rounded bg-muted px-1 py-0.5 text-xs">kcmp</code> 等
+                    </td>
+                  </tr>
+                  <tr class="border-t border-border">
+                    <td class="whitespace-nowrap px-4 py-3 align-top">
+                      <code class="font-mono text-xs">procfs 挂载层封堵</code>
+                      <span class="mt-1 block text-xs text-muted-foreground">v0.9.1</span>
+                    </td>
+                    <td class="px-4 py-3 text-muted-foreground">
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">/proc/sys</code> 只读、
+                      <code class="rounded bg-muted px-1 py-0.5 text-xs">/proc/sysrq-trigger</code> 屏蔽。
+                      这几处<strong class="text-foreground">不受 capability 约束</strong>
+                      （内核只做 DAC 检查），必须靠挂载层堵。
+                    </td>
+                  </tr>
+                  <tr class="border-t border-border">
+                    <td class="whitespace-nowrap px-4 py-3 align-top">
+                      <code class="font-mono text-xs">容器 → 宿主网络隔离</code>
+                      <span class="mt-1 block text-xs text-muted-foreground">v0.9.3</span>
+                    </td>
+                    <td class="px-4 py-3 text-muted-foreground">
+                      容器访问宿主本机地址默认 <code class="rounded bg-muted px-1 py-0.5 text-xs">DROP</code>，
+                      使容器访问不到宿主上监听在通配地址的服务（SSH、管理端口等）。
                     </td>
                   </tr>
                 </tbody>
@@ -604,6 +704,155 @@ licore run --cap-drop ALL --cap-add NET_BIND_SERVICE myapp:v1   # 清空后只�
 licore boot status     # 查看当前状态
 licore boot disable    # 取消自启</code></pre>
             </div>
+          </section>
+
+          <!-- 支持平台 -->
+          <section id="platform" class="scroll-mt-24">
+            <h2 class="flex items-center gap-2 text-2xl font-bold tracking-tight">
+              <Cpu class="size-5 text-primary" aria-hidden="true" />
+              支持平台
+            </h2>
+
+            <div class="mt-5 overflow-hidden rounded-xl border border-border">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/50">
+                  <tr>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">平台</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">支持级别</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="p in [
+                      { name: 'Linux 服务器', level: '完整支持' },
+                      { name: 'Android（有 Root）', level: '完整支持（native_linux 后端，差异自动适配）' },
+                      { name: 'Android（无 Root）', level: '官方不支持（可自行在 proot 等环境运行，不保证可用性）' },
+                      { name: 'macOS', level: '通过轻量 VM' },
+                      { name: 'Windows（WSL2 / 虚拟机）', level: '通过 Linux 版运行' },
+                    ]"
+                    :key="p.name"
+                    class="border-t border-border"
+                  >
+                    <td class="whitespace-nowrap px-4 py-3 align-top font-medium">{{ p.name }}</td>
+                    <td class="px-4 py-3 text-muted-foreground">{{ p.level }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 class="mt-8 text-base font-semibold">平台能力矩阵</h3>
+            <p class="mt-2 text-sm leading-7 text-muted-foreground">
+              下表是<strong class="text-foreground">真机逐项实测</strong>的结果，因此刻意不标版本号 ——
+              能力矩阵只在重新跑一遍真机验收时才更新。
+            </p>
+            <div class="mt-4 overflow-hidden rounded-xl border border-border">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/50">
+                  <tr>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">能力</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">Linux（root）</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">Linux（非 root）</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">Android（root）</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">macOS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="c in [
+                      { k: '镜像 / 卷 / build', a: '✅', b: '✅', c: '✅', d: '✅' },
+                      { k: 'run / stop / ps / rm', a: '✅', b: '✅', c: '✅', d: '—' },
+                      { k: '网络（bridge / veth / NAT / DNS）', a: '✅', b: '仅 host / none', c: '✅', d: '—' },
+                      { k: '资源限制（cgroup）', a: '✅ v2', b: '⚠️ 视委派而定', c: '✅ v2 优先，回退 v1', d: '—' },
+                      { k: 'exec 进入命名空间', a: '✅', b: '❌（需 CAP_SYS_ADMIN）', c: '✅ 需系统有 nsenter', d: '❌' },
+                      { k: '卷 :ro 只读', a: '✅', b: '✅', c: '✅', d: '—' },
+                      { k: '开机自启（boot enable）', a: '✅ systemd', b: '✅ systemd', c: '❌ Magisk 后端未实现', d: '—' },
+                    ]"
+                    :key="c.k"
+                    class="border-t border-border"
+                  >
+                    <td class="px-4 py-3 align-top font-medium">{{ c.k }}</td>
+                    <td class="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">{{ c.a }}</td>
+                    <td class="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">{{ c.b }}</td>
+                    <td class="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">{{ c.c }}</td>
+                    <td class="whitespace-nowrap px-4 py-3 align-top text-muted-foreground">{{ c.d }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 class="mt-8 text-base font-semibold">已知限制</h3>
+            <ul class="mt-4 space-y-2 text-sm leading-6 text-muted-foreground">
+              <li
+                v-for="(l, i) in [
+                  '宿主经 127.0.0.1:<发布端口> 访问容器不通：经宿主 eth0 IP 或外部 IP 正常，容器内自访问也正常，只有宿主走回环地址这一条路径不通（DNAT 只改目的地址所致）。',
+                  'exec 依赖系统 nsenter：util-linux（Linux）、Toybox（Android 10+）自带，旧版 Android 需装 busybox；缺失时返回带安装指引的明确错误，其余功能不受影响。macOS / Windows 上 exec 不可用。',
+                  '层缓存不回收：licore rmi 只删镜像目录，共享的层缓存跨镜像复用且不会自动清理（引用计数尚未实现）。',
+                  '未实现的资源能力显式报错：--storage、--gpu、--npu、--network-bandwidth 在 CLI 层直接拒绝，不会静默降级。',
+                  'Android：licore boot enable 尚不生成 Magisk service.d 脚本；SELinux enforcing 真机行为未实测（官方从不调 setenforce、不改设备策略）。',
+                ]"
+                :key="i"
+                class="flex gap-2"
+              >
+                <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                <span>{{ l }}</span>
+              </li>
+            </ul>
+
+            <h3 class="mt-8 text-base font-semibold">实测与未验证</h3>
+            <p class="mt-2 text-sm leading-7 text-muted-foreground">
+              官方把边界诚实地划开：<strong class="text-foreground">"未验证"不代表不能用，
+              只代表没在真实环境里跑过</strong>。把重要业务压上去之前，建议先在自己的机器上验一遍。
+            </p>
+            <div class="mt-4 overflow-hidden rounded-xl border border-border">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/50">
+                  <tr>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">项目</th>
+                    <th scope="col" class="px-4 py-3 text-left font-medium">状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="s in [
+                      { k: 'Linux 服务器（root）全功能验收', v: '✅ 已实测（A–J：PASS=10 / SKIP=1 / FAIL=0）' },
+                      { k: '每容器内存成本', v: '✅ 已实测（100 容器并发，≈ 2.3 MiB/容器）' },
+                      { k: '容器权限隔离', v: '✅ 已真机验证（v0.9.5）' },
+                      { k: 'licore convert 真机', v: '✅ 已真机验证（nginx:1.27-alpine 转换并 --import）' },
+                      { k: 'Android 真机', v: '❌ 未验证（适配层已实现，但未在真实设备跑过）' },
+                      { k: 'macOS', v: '❌ 未验证（vm_darwin 后端尚未实现，仅保证可交叉编译）' },
+                      { k: '多主机网络', v: '❌ 未验证（只做单机 bridge / veth / NAT）' },
+                      { k: '大规模并发', v: '⚠️ 仅到 100 容器' },
+                      { k: 'ARM / 386 / riscv64 真机运行', v: '⚠️ 仅交叉编译通过' },
+                    ]"
+                    :key="s.k"
+                    class="border-t border-border"
+                  >
+                    <td class="px-4 py-3 align-top font-medium">{{ s.k }}</td>
+                    <td class="px-4 py-3 text-muted-foreground">{{ s.v }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p class="mt-4 text-xs leading-5 text-muted-foreground">
+              发现文档与实现不符请直接开 issue —— 官方视其为 bug。
+              更细的清单见上游
+              <a
+                :href="`${repo.url}/blob/main/docs/known-limitations.md`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary underline underline-offset-4"
+                >docs/known-limitations.md</a
+              >
+              与
+              <a
+                :href="`${repo.url}/blob/main/docs/unverified.md`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary underline underline-offset-4"
+                >docs/unverified.md</a
+              >。
+            </p>
           </section>
 
           <!-- 兼容性 -->

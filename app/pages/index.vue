@@ -311,8 +311,8 @@ const TYPE_COLORS: Record<string, string> = {
           </h1>
 
           <p class="mx-auto mt-6 max-w-2xl text-base leading-8 text-muted-foreground sm:text-lg">
-            LiCore 常驻内存仅 <strong class="text-foreground">10–20 MiB</strong>，单二进制分发，
-            覆盖 Linux / Android / macOS，Windows 可经 WSL2 或虚拟机运行。
+            单容器内存实测 <strong class="text-foreground">≈ 2.3 MiB</strong>（100 容器并发摊薄），
+            单二进制分发，覆盖 Linux / Android / macOS，Windows 可经 WSL2 或虚拟机运行。
             它拥有自研镜像格式与分发体系，
             <strong class="text-foreground">运行时不需要 Docker / OCI</strong>，
             同时支持用 <strong class="text-foreground">licore convert</strong> 把现成 Docker 镜像转成 .licore。

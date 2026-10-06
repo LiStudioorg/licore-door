@@ -179,6 +179,44 @@ useHead({
                 （单向，需本机有 docker CLI）。
               </p>
             </div>
+
+            <div
+              class="mt-5 flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-4"
+            >
+              <ShieldCheck class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+              <div class="text-sm leading-6">
+                <p class="font-medium">现在能上生产吗？请按「可评估、勿托付」来对待</p>
+                <ul class="mt-2 space-y-1.5 text-muted-foreground">
+                  <li class="flex gap-2">
+                    <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                    <span>
+                      在 <strong class="text-foreground">Linux root 服务器</strong>上做过 A–J 全功能验收
+                      （PASS=10 / SKIP=1 / FAIL=0），日常 run / ps / exec / 卷 / 资源限制是能跑通的。
+                    </span>
+                  </li>
+                  <li class="flex gap-2">
+                    <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                    <span>
+                      <strong class="text-foreground">Android 真机、macOS、多主机网络、大规模并发均未验证</strong>。
+                    </span>
+                  </li>
+                  <li class="flex gap-2">
+                    <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                    <span>
+                      项目<strong class="text-foreground">尚未发布 1.0</strong>，接口与行为仍可能变化；
+                      层缓存不做引用计数回收；exec 需要运行环境有 nsenter。
+                    </span>
+                  </li>
+                  <li class="flex gap-2">
+                    <span aria-hidden="true" class="mt-2.5 size-1 shrink-0 rounded-full bg-muted-foreground/50" />
+                    <span>目前<strong class="text-foreground">没有真实用户群</strong>，出问题时基本得自己读源码。</span>
+                  </li>
+                </ul>
+                <p class="mt-2 text-muted-foreground">
+                  适合在个人服务器、实验环境、CI 里试；把重要业务压上去之前，建议先在自己的机器上验一遍。
+                </p>
+              </div>
+            </div>
           </section>
 
           <!-- 设计取舍 -->
